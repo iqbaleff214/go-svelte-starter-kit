@@ -1,10 +1,10 @@
 .PHONY: help dev infra stop migrate migrate-down migrate-create seed test lint build
 
 # ─── Variables ────────────────────────────────────────────────────────────────
-MIGRATE      := docker run --rm --network host -v $(PWD)/backend/migrations:/migrations \
-                  migrate/migrate -path=/migrations -database "$(DATABASE_URL)"
-DATABASE_URL ?= postgres://starter:secret@localhost:5432/starter_kit?sslmode=disable
+DATABASE_URL   := $(or $(DATABASE_URL),postgres://starter:secret@localhost:5432/starter_kit?sslmode=disable)
 MIGRATION_NAME ?= new_migration
+MIGRATE        := docker run --rm --network host -v $(PWD)/backend/migrations:/migrations \
+                  migrate/migrate -path=/migrations -database "$(DATABASE_URL)"
 
 help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \

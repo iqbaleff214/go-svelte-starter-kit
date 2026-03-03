@@ -61,7 +61,7 @@
 		</svg>
 	</div>
 {:else if $currentUser}
-	<div class="min-h-screen bg-[var(--color-background)] flex">
+	<div class="h-screen overflow-hidden bg-[var(--color-background)] flex">
 		<!-- Sidebar overlay (mobile) -->
 		{#if sidebarOpen}
 			<button

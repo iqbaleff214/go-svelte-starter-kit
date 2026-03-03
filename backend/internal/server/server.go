@@ -83,13 +83,20 @@ func (s *Server) routes() http.Handler {
 		r.Get("/health", s.handleHealth)
 		r.Get("/ready", s.handleReady)
 
-		// Auth (rate-limited)
+		// Auth routes
 		r.Route("/auth", func(r chi.Router) {
-			r.Use(middleware.RateLimit(s.cfg.Rate.AuthPerMin, time.Minute))
-			r.Post("/register", authHandler.Register)
-			r.Post("/login", authHandler.Login)
-			r.Post("/refresh", authHandler.Refresh)
-			r.Post("/logout", authHandler.Logout)
+			// Strict limit on credential endpoints (brute-force protection)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RateLimit(s.cfg.Rate.AuthPerMin, time.Minute))
+				r.Post("/register", authHandler.Register)
+				r.Post("/login", authHandler.Login)
+			})
+			// Higher limit on session management (called automatically by the frontend)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RateLimit(s.cfg.Rate.APIPerMin, time.Minute))
+				r.Post("/refresh", authHandler.Refresh)
+				r.Post("/logout", authHandler.Logout)
+			})
 		})
 
 		// Protected routes
