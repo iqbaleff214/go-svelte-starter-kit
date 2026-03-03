@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A full-stack starter kit pairing a **Go** backend (Chi router) with a **SvelteKit** frontend (SSR disabled, CSR-only). Currently in Phase 1 (auth scaffold). See `PRD.md` for the full feature roadmap.
+A full-stack starter kit pairing a **Go** backend (Chi router) with a **SvelteKit** frontend (SSR disabled, CSR-only). Currently in Phase 1 (auth scaffold).
+
+**`PRD.md` is the authoritative guide for all work in this project.** Always consult it before implementing any feature — it defines acceptance criteria, data models, API contracts, UI routes, and phase milestones.
 
 ## Commands
 
