@@ -232,7 +232,7 @@
 				</p>
 				<div class="flex flex-col items-center gap-3 rounded-[var(--radius)] border border-[var(--color-border)] p-4">
 					<img
-						src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={encodeURIComponent(setupData.otpauth_url)}"
+						src="data:image/png;base64,{setupData.qr_code_png}"
 						alt="QR code"
 						class="h-44 w-44"
 					/>

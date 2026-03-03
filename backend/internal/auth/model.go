@@ -45,6 +45,22 @@ type LoginResponse struct {
 type TwoFASetupResponse struct {
 	Secret     string `json:"secret"`
 	OTPAuthURL string `json:"otpauth_url"`
+	QRCodePNG  string `json:"qr_code_png"` // base64-encoded PNG
+}
+
+// ---- Email verification / password reset ----
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email" validate:"required,email"`
+}
+
+type ResetPasswordRequest struct {
+	Token    string `json:"token"    validate:"required"`
+	Password string `json:"password" validate:"required,min=8,max=72"`
+}
+
+type VerifyEmailRequest struct {
+	Token string `json:"token" validate:"required"`
 }
 
 type TwoFAConfirmRequest struct {

@@ -1,11 +1,16 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"image/png"
 	"math/big"
 
+	"github.com/boombuler/barcode"
+	"github.com/boombuler/barcode/qr"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -49,4 +54,21 @@ func randomCode(length int) string {
 		result[i] = backupCodeChars[n.Int64()]
 	}
 	return string(result)
+}
+
+// GenerateQRCodePNG encodes the given otpauth URL into a 200×200 PNG and returns the raw bytes.
+func GenerateQRCodePNG(otpauthURL string) ([]byte, error) {
+	code, err := qr.Encode(otpauthURL, qr.H, qr.Auto)
+	if err != nil {
+		return nil, fmt.Errorf("encode qr: %w", err)
+	}
+	scaled, err := barcode.Scale(code, 200, 200)
+	if err != nil {
+		return nil, fmt.Errorf("scale qr: %w", err)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, scaled); err != nil {
+		return nil, fmt.Errorf("encode png: %w", err)
+	}
+	return buf.Bytes(), nil
 }

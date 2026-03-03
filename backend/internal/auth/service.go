@@ -2,13 +2,16 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/token"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -25,14 +28,16 @@ var (
 type Service struct {
 	repo         *Repository
 	tokenManager *token.Manager
+	emailQueue   *email.Queue
 	refreshTTL   time.Duration
 	accessTTL    time.Duration
 }
 
-func NewService(repo *Repository, tokenManager *token.Manager, accessTTL, refreshTTL time.Duration) *Service {
+func NewService(repo *Repository, tokenManager *token.Manager, emailQueue *email.Queue, accessTTL, refreshTTL time.Duration) *Service {
 	return &Service{
 		repo:         repo,
 		tokenManager: tokenManager,
+		emailQueue:   emailQueue,
 		refreshTTL:   refreshTTL,
 		accessTTL:    accessTTL,
 	}
@@ -61,6 +66,15 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*LoginResp
 	if err != nil {
 		return nil, fmt.Errorf("generate tokens: %w", err)
 	}
+
+	// Enqueue welcome + verification emails (fire-and-forget)
+	go func() {
+		bgCtx := context.Background()
+		_ = s.emailQueue.EnqueueWelcome(bgCtx, user.ID, user.Email, user.DisplayName)
+		if token, err := s.createVerificationToken(bgCtx, user.ID); err == nil {
+			_ = s.emailQueue.EnqueueVerification(bgCtx, user.ID, user.Email, user.DisplayName, token)
+		}
+	}()
 
 	return &LoginResponse{
 		User:  toUserResponse(user),
@@ -91,6 +105,10 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, r *http.Request) 
 		return &LoginResponse{TwoFARequired: &twoFARequired, PreAuthToken: &preAuthToken}, "", nil
 	}
 
+	// Detect new device: send security alert if no existing session matches this user agent
+	ua := r.UserAgent()
+	isNewDevice := !s.repo.HasSessionByUserAgent(ctx, user.ID, ua)
+
 	roles, _ := s.repo.GetUserRoles(ctx, user.ID)
 
 	sessionID := uuid.New()
@@ -102,10 +120,15 @@ func (s *Service) Login(ctx context.Context, req LoginRequest, r *http.Request) 
 	tokenHash := hashToken(pair.RefreshToken)
 	expiresAt := time.Now().Add(s.refreshTTL)
 
-	_, err = s.repo.CreateSession(ctx, sessionID, user.ID, tokenHash,
-		r.UserAgent(), r.RemoteAddr, expiresAt)
+	_, err = s.repo.CreateSession(ctx, sessionID, user.ID, tokenHash, ua, r.RemoteAddr, expiresAt)
 	if err != nil {
 		return nil, "", fmt.Errorf("create session: %w", err)
+	}
+
+	if isNewDevice {
+		go func() {
+			_ = s.emailQueue.EnqueueSecurityAlert(context.Background(), user.ID, user.Email, user.DisplayName, r.RemoteAddr, ua)
+		}()
 	}
 
 	return &LoginResponse{
@@ -192,6 +215,10 @@ func (s *Service) LoginOrCreateWithOAuth(ctx context.Context, info *OAuthUserInf
 			if err := s.repo.AssignDefaultRole(ctx, user.ID); err != nil {
 				fmt.Printf("warn: assign default role to user %s: %v\n", user.ID, err)
 			}
+			// Welcome new OAuth users
+			go func(u *User) {
+				_ = s.emailQueue.EnqueueWelcome(context.Background(), u.ID, u.Email, u.DisplayName)
+			}(user)
 		}
 	}
 
@@ -221,8 +248,8 @@ func (s *Service) LoginOrCreateWithOAuth(ctx context.Context, info *OAuthUserInf
 }
 
 // SetupTwoFA generates a TOTP secret and stores it (not yet enabled until ConfirmTwoFA).
-func (s *Service) SetupTwoFA(ctx context.Context, userID uuid.UUID, email string) (*TwoFASetupResponse, error) {
-	secret, otpauthURL, err := GenerateSecret(email, "StarterKit")
+func (s *Service) SetupTwoFA(ctx context.Context, userID uuid.UUID, emailAddr string) (*TwoFASetupResponse, error) {
+	secret, otpauthURL, err := GenerateSecret(emailAddr, "StarterKit")
 	if err != nil {
 		return nil, fmt.Errorf("generate totp secret: %w", err)
 	}
@@ -231,7 +258,16 @@ func (s *Service) SetupTwoFA(ctx context.Context, userID uuid.UUID, email string
 		return nil, fmt.Errorf("store totp secret: %w", err)
 	}
 
-	return &TwoFASetupResponse{Secret: secret, OTPAuthURL: otpauthURL}, nil
+	pngBytes, err := GenerateQRCodePNG(otpauthURL)
+	if err != nil {
+		return nil, fmt.Errorf("generate qr code: %w", err)
+	}
+
+	return &TwoFASetupResponse{
+		Secret:     secret,
+		OTPAuthURL: otpauthURL,
+		QRCodePNG:  base64.StdEncoding.EncodeToString(pngBytes),
+	}, nil
 }
 
 // ConfirmTwoFA validates the TOTP code, enables 2FA, and returns 10 backup codes.
@@ -258,6 +294,13 @@ func (s *Service) ConfirmTwoFA(ctx context.Context, userID uuid.UUID, code strin
 	_ = s.repo.DeleteBackupCodes(ctx, userID)
 	if err := s.repo.CreateBackupCodes(ctx, userID, hashed); err != nil {
 		return nil, fmt.Errorf("create backup codes: %w", err)
+	}
+
+	// Enqueue backup codes email
+	if u, err := s.repo.FindUserByID(ctx, userID); err == nil {
+		go func() {
+			_ = s.emailQueue.EnqueueTwoFABackupCodes(context.Background(), u.ID, u.Email, u.DisplayName, plain)
+		}()
 	}
 
 	return plain, nil
@@ -339,6 +382,108 @@ func (s *Service) VerifyTwoFA(ctx context.Context, req TwoFAVerifyRequest, r *ht
 		User:  toUserResponse(user),
 		Token: s.toTokenResponse(pair),
 	}, pair.RefreshToken, nil
+}
+
+// ---- Password reset / email verification ----
+
+// ForgotPassword creates a reset token and enqueues the reset email.
+// Always returns nil to prevent email enumeration.
+func (s *Service) ForgotPassword(ctx context.Context, emailAddr string) error {
+	user, err := s.repo.FindUserByEmail(ctx, emailAddr)
+	if err != nil {
+		return nil // silent — don't reveal whether email exists
+	}
+
+	plain, tokenHash, err := generateToken()
+	if err != nil {
+		return fmt.Errorf("generate token: %w", err)
+	}
+
+	expiresAt := time.Now().Add(time.Hour)
+	if err := s.repo.CreatePasswordReset(ctx, user.ID, tokenHash, expiresAt); err != nil {
+		return fmt.Errorf("create password reset: %w", err)
+	}
+
+	go func() {
+		_ = s.emailQueue.EnqueuePasswordReset(context.Background(), user.ID, user.Email, user.DisplayName, plain)
+	}()
+	return nil
+}
+
+// ResetPassword validates the token and updates the user's password.
+func (s *Service) ResetPassword(ctx context.Context, plainToken, newPassword string) error {
+	tokenHash := hashToken(plainToken)
+	user, err := s.repo.FindPasswordReset(ctx, tokenHash)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+
+	if err := s.repo.UsePasswordReset(ctx, tokenHash, string(newHash)); err != nil {
+		return ErrInvalidCredentials
+	}
+
+	// Revoke all sessions so attackers can't stay logged in
+	_ = s.repo.RevokeAllSessions(ctx, user.ID)
+	return nil
+}
+
+// VerifyEmail marks the user's email as verified.
+func (s *Service) VerifyEmail(ctx context.Context, plainToken string) error {
+	tokenHash := hashToken(plainToken)
+	user, err := s.repo.FindEmailVerification(ctx, tokenHash)
+	if err != nil {
+		return ErrInvalidCredentials
+	}
+	return s.repo.MarkEmailVerified(ctx, user.ID, tokenHash)
+}
+
+// ResendVerification creates a new verification token for the given user.
+func (s *Service) ResendVerification(ctx context.Context, userID uuid.UUID) error {
+	user, err := s.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if user.EmailVerifiedAt != nil {
+		return errors.New("email already verified")
+	}
+
+	plain, err := s.createVerificationToken(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		_ = s.emailQueue.EnqueueVerification(context.Background(), userID, user.Email, user.DisplayName, plain)
+	}()
+	return nil
+}
+
+// createVerificationToken generates a token, stores its hash, and returns the plain token.
+func (s *Service) createVerificationToken(ctx context.Context, userID uuid.UUID) (string, error) {
+	plain, tokenHash, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.repo.CreateEmailVerification(ctx, userID, tokenHash, time.Now().Add(time.Hour)); err != nil {
+		return "", err
+	}
+	return plain, nil
+}
+
+// generateToken creates 32 random bytes, returns hex plain + sha256 hash.
+func generateToken() (plain, hash string, err error) {
+	b := make([]byte, 32)
+	if _, err = rand.Read(b); err != nil {
+		return "", "", err
+	}
+	plain = hex.EncodeToString(b)
+	hash = hashToken(plain)
+	return plain, hash, nil
 }
 
 func hashToken(t string) string {

@@ -33,6 +33,7 @@ export interface Session {
 export interface TwoFASetupResponse {
 	secret: string;
 	otpauth_url: string;
+	qr_code_png: string; // base64-encoded PNG
 }
 
 export interface TwoFAConfirmResponse {

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Button from '$components/ui/Button.svelte';
 	import Input from '$components/ui/Input.svelte';
+	import { authApi } from '$api/auth';
 	import { toast } from '$stores/toast';
 
 	let email = $state('');
@@ -11,8 +12,7 @@
 		e.preventDefault();
 		loading = true;
 		try {
-			// TODO: wire to POST /api/auth/forgot-password in Phase 2
-			await new Promise((r) => setTimeout(r, 800));
+			await authApi.forgotPassword(email);
 			sent = true;
 		} catch {
 			toast.error('Something went wrong', 'Please try again later.');

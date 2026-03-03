@@ -1,0 +1,53 @@
+{{define "security_alert.html"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>New login detected – {{.AppName}}</title>
+  <style>
+    body{margin:0;padding:0;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+    .wrap{max-width:600px;margin:40px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+    .hdr{background:#18181b;padding:24px 32px}
+    .hdr a{color:#fff;font-size:20px;font-weight:700;text-decoration:none}
+    .body{padding:32px;color:#18181b;font-size:15px;line-height:1.6}
+    .body h1{margin:0 0 16px;font-size:22px;font-weight:700}
+    .body p{margin:0 0 16px;color:#52525b}
+    .info-box{background:#f4f4f5;border-radius:6px;padding:16px 20px;margin:12px 0 16px}
+    .info-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #e4e4e7;font-size:14px}
+    .info-row:last-child{border-bottom:none}
+    .info-label{color:#71717a;font-weight:500}
+    .info-value{color:#18181b;font-weight:600;text-align:right;max-width:60%;word-break:break-all}
+    .warn{background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;padding:14px 16px;font-size:14px;color:#991b1b;margin:12px 0 16px}
+    .ftr{padding:16px 32px 24px;text-align:center;font-size:12px;color:#a1a1aa}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hdr"><a href="#">⚡ {{.AppName}}</a></div>
+    <div class="body">
+      <h1>New login detected</h1>
+      <p>Hi {{.DisplayName}}, we noticed a new sign-in to your account with the following details:</p>
+      <div class="info-box">
+        <div class="info-row">
+          <span class="info-label">IP Address</span>
+          <span class="info-value">{{.IP}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Device / Browser</span>
+          <span class="info-value">{{.Device}}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Time</span>
+          <span class="info-value">{{.Time}}</span>
+        </div>
+      </div>
+      <p>If this was you, no action is needed.</p>
+      <div class="warn">🔒 If you did not sign in, please change your password immediately and consider enabling two-factor authentication.</div>
+    </div>
+    <div class="ftr">
+      <p>© {{.AppName}}. All rights reserved.</p>
+      <p>This is an automated security notification.</p>
+    </div>
+  </div>
+</body>
+</html>{{end}}

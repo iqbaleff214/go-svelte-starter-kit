@@ -367,6 +367,79 @@ func (h *Handler) DisableTwoFA(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "2FA disabled"}})
 }
 
+// ---- Email verification / password reset ----
+
+// POST /api/auth/forgot-password
+func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req ForgotPasswordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if errs := h.validator.Validate(req); len(errs) > 0 {
+		respondValidation(w, errs)
+		return
+	}
+
+	// Always succeed to prevent email enumeration
+	_ = h.svc.ForgotPassword(r.Context(), req.Email)
+	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "If that email exists, a reset link has been sent"}})
+}
+
+// POST /api/auth/reset-password
+func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if errs := h.validator.Validate(req); len(errs) > 0 {
+		respondValidation(w, errs)
+		return
+	}
+
+	if err := h.svc.ResetPassword(r.Context(), req.Token, req.Password); err != nil {
+		respondError(w, http.StatusUnprocessableEntity, "invalid_token", "Reset link is invalid or expired")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "Password updated successfully"}})
+}
+
+// POST /api/auth/verify-email
+func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req VerifyEmailRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if errs := h.validator.Validate(req); len(errs) > 0 {
+		respondValidation(w, errs)
+		return
+	}
+
+	if err := h.svc.VerifyEmail(r.Context(), req.Token); err != nil {
+		respondError(w, http.StatusUnprocessableEntity, "invalid_token", "Verification link is invalid or expired")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "Email verified successfully"}})
+}
+
+// POST /api/auth/resend-verification  (protected)
+func (h *Handler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	userID, err := parseUUID(claims.UserID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_user", "Invalid user ID")
+		return
+	}
+
+	if err := h.svc.ResendVerification(r.Context(), userID); err != nil {
+		respondError(w, http.StatusConflict, "already_verified", err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "Verification email sent"}})
+}
+
 // ---- response helpers ----
 
 type envelope map[string]any

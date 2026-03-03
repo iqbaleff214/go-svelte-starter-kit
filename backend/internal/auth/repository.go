@@ -354,6 +354,132 @@ func (r *Repository) RevokeAllOtherSessions(ctx context.Context, userID, current
 	return err
 }
 
+func (r *Repository) RevokeAllSessions(ctx context.Context, userID uuid.UUID) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`,
+		userID)
+	return err
+}
+
+// HasSessionByUserAgent returns true if the user has an active session from the given user agent.
+func (r *Repository) HasSessionByUserAgent(ctx context.Context, userID uuid.UUID, userAgent string) bool {
+	var count int
+	r.db.Pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_sessions WHERE user_id=$1 AND user_agent=$2 AND revoked_at IS NULL AND expires_at > NOW()`,
+		userID, userAgent).Scan(&count) //nolint:errcheck
+	return count > 0
+}
+
+// ---- Email verification ----
+
+func (r *Repository) CreateEmailVerification(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`INSERT INTO email_verifications (id, user_id, token_hash, expires_at, created_at)
+		 VALUES ($1, $2, $3, $4, NOW())
+		 ON CONFLICT (token_hash) DO NOTHING`,
+		uuid.New(), userID, tokenHash, expiresAt,
+	)
+	return err
+}
+
+func (r *Repository) FindEmailVerification(ctx context.Context, tokenHash string) (*User, error) {
+	query := `
+		SELECT u.id, u.email, u.password_hash, u.display_name, u.avatar_url, u.bio,
+		       u.email_verified_at, u.two_fa_enabled, u.two_fa_secret,
+		       u.deleted_at, u.created_at, u.updated_at
+		FROM email_verifications ev
+		JOIN users u ON u.id = ev.user_id
+		WHERE ev.token_hash = $1
+		  AND ev.used_at IS NULL
+		  AND ev.expires_at > NOW()
+		  AND u.deleted_at IS NULL`
+
+	row := r.db.Pool.QueryRow(ctx, query, tokenHash)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("find email verification: %w", err)
+	}
+	return u, nil
+}
+
+func (r *Repository) MarkEmailVerified(ctx context.Context, userID uuid.UUID, tokenHash string) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`UPDATE email_verifications SET used_at = NOW() WHERE token_hash = $1`,
+		tokenHash,
+	)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.Pool.Exec(ctx,
+		`UPDATE users SET email_verified_at = NOW(), updated_at = NOW() WHERE id = $1`,
+		userID,
+	)
+	return err
+}
+
+// ---- Password reset ----
+
+func (r *Repository) CreatePasswordReset(ctx context.Context, userID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at)
+		 VALUES ($1, $2, $3, $4, NOW())
+		 ON CONFLICT (token_hash) DO NOTHING`,
+		uuid.New(), userID, tokenHash, expiresAt,
+	)
+	return err
+}
+
+func (r *Repository) FindPasswordReset(ctx context.Context, tokenHash string) (*User, error) {
+	query := `
+		SELECT u.id, u.email, u.password_hash, u.display_name, u.avatar_url, u.bio,
+		       u.email_verified_at, u.two_fa_enabled, u.two_fa_secret,
+		       u.deleted_at, u.created_at, u.updated_at
+		FROM password_resets pr
+		JOIN users u ON u.id = pr.user_id
+		WHERE pr.token_hash = $1
+		  AND pr.used_at IS NULL
+		  AND pr.expires_at > NOW()
+		  AND u.deleted_at IS NULL`
+
+	row := r.db.Pool.QueryRow(ctx, query, tokenHash)
+	u, err := scanUser(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("find password reset: %w", err)
+	}
+	return u, nil
+}
+
+func (r *Repository) UsePasswordReset(ctx context.Context, tokenHash, newPasswordHash string) error {
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var userID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`UPDATE password_resets SET used_at = NOW()
+		 WHERE token_hash = $1 AND used_at IS NULL
+		 RETURNING user_id`, tokenHash).Scan(&userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("mark reset used: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`,
+		newPasswordHash, userID); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
 func scanUser(row pgx.Row) (*User, error) {
 	u := &User{}
 	err := row.Scan(

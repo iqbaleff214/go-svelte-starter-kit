@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
+	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
 	"github.com/404nfid/go-svelte-starter-kit/internal/user"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
@@ -78,9 +79,13 @@ func (s *Server) routes() http.Handler {
 		s.cfg.JWT.RefreshTTL,
 	)
 
+	// ---- Email ----
+	emailRepo := email.NewRepository(s.db)
+	emailQueue := email.NewQueue(s.cfg.Redis.URL, emailRepo)
+
 	// ---- Auth ----
 	authRepo := auth.NewRepository(s.db)
-	authSvc := auth.NewService(authRepo, tokenManager, s.cfg.JWT.AccessTTL, s.cfg.JWT.RefreshTTL)
+	authSvc := auth.NewService(authRepo, tokenManager, emailQueue, s.cfg.JWT.AccessTTL, s.cfg.JWT.RefreshTTL)
 	googleProvider := auth.NewGoogleProvider(s.cfg.Google)
 	authHandler := auth.NewHandler(
 		authSvc, googleProvider, s.redis.Client, s.cfg.App.FrontendURL,
@@ -120,6 +125,13 @@ func (s *Server) routes() http.Handler {
 			r.Post("/google/exchange", authHandler.ExchangeOAuthCode)
 			// 2FA verify (no auth middleware — uses pre_auth_token)
 			r.Post("/2fa/verify", authHandler.VerifyTwoFA)
+			// Password reset & email verification (public, rate-limited)
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RateLimit(s.cfg.Rate.AuthPerMin, time.Minute))
+				r.Post("/forgot-password", authHandler.ForgotPassword)
+				r.Post("/reset-password", authHandler.ResetPassword)
+				r.Post("/verify-email", authHandler.VerifyEmail)
+			})
 		})
 
 		// Protected routes
@@ -131,6 +143,8 @@ func (s *Server) routes() http.Handler {
 			r.Post("/auth/2fa/setup", authHandler.SetupTwoFA)
 			r.Post("/auth/2fa/confirm", authHandler.ConfirmTwoFA)
 			r.Delete("/auth/2fa", authHandler.DisableTwoFA)
+			// Email verification resend
+			r.Post("/auth/resend-verification", authHandler.ResendVerification)
 
 			// Profile & sessions
 			r.Get("/me", userHandler.GetProfile)

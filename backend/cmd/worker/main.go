@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/logger"
@@ -45,14 +46,33 @@ func main() {
 	}
 	defer redis.Close()
 
-	log.Info("worker started", "env", cfg.App.Env)
-	_ = db
-	_ = redis
+	emailRepo := email.NewRepository(db)
 
-	// Email worker will be wired in Phase 3.
-	// For now, keep the process alive.
+	emailEngine, err := email.NewEngine("templates/email")
+	if err != nil {
+		log.Error("load email templates", "error", err)
+		os.Exit(1)
+	}
+
+	emailSender := email.NewSender(cfg.Email)
+
+	worker := email.NewWorker(cfg.Redis.URL, emailEngine, emailSender, emailRepo, cfg.App.URL)
+
+	log.Info("worker started", "env", cfg.App.Env)
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+
+	go func() {
+		<-quit
+		log.Info("shutting down worker...")
+		worker.Stop()
+	}()
+
+	if err := worker.Start(); err != nil {
+		log.Error("worker error", "error", err)
+		os.Exit(1)
+	}
+
 	log.Info("worker stopped")
 }
