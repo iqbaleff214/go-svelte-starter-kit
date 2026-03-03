@@ -20,6 +20,13 @@ function createAuthStore() {
 
 		setAuth(user: User, accessToken: string) {
 			api.setAccessToken(accessToken);
+			// Decode JWT payload to extract roles (browser-side; no signature verification needed)
+			try {
+				const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+				user = { ...user, roles: payload.roles ?? [] };
+			} catch {
+				user = { ...user, roles: [] };
+			}
 			set({ user, accessToken, loading: false });
 		},
 

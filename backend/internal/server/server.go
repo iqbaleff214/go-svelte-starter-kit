@@ -12,6 +12,7 @@ import (
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
 	"github.com/404nfid/go-svelte-starter-kit/internal/notification"
+	"github.com/404nfid/go-svelte-starter-kit/internal/rbac"
 	"github.com/404nfid/go-svelte-starter-kit/internal/user"
 	"github.com/404nfid/go-svelte-starter-kit/internal/ws"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
@@ -108,6 +109,11 @@ func (s *Server) routes() http.Handler {
 	notifSvc := notification.NewService(notifRepo, hub)
 	notifHandler := notification.NewHandler(notifSvc, v)
 
+	// ---- RBAC ----
+	rbacRepo := rbac.NewRepository(s.db)
+	rbacSvc := rbac.NewService(rbacRepo, s.redis.Client)
+	rbacHandler := rbac.NewHandler(rbacSvc, emailRepo, v)
+
 	// ---- Static file serving (avatars) ----
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
@@ -166,6 +172,27 @@ func (s *Server) routes() http.Handler {
 			r.Patch("/notifications/{id}/read", notifHandler.MarkRead)
 			r.Patch("/notifications/read-all", notifHandler.MarkAllRead)
 			r.Post("/notifications/test", notifHandler.Test)
+
+			// Admin panel — role-gated (admin or superadmin)
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(middleware.RequireRole("admin", "superadmin"))
+				// User management
+				r.Get("/users", rbacHandler.ListUsers)
+				r.Patch("/users/{userId}/roles/{roleId}", rbacHandler.AssignRole)
+				r.Delete("/users/{userId}/roles/{roleId}", rbacHandler.RevokeRole)
+				r.Delete("/users/{userId}", rbacHandler.DeleteUser)
+				// Role management
+				r.Get("/roles", rbacHandler.ListRoles)
+				r.Post("/roles", rbacHandler.CreateRole)
+				r.Get("/roles/{id}", rbacHandler.GetRole)
+				r.Put("/roles/{id}", rbacHandler.UpdateRole)
+				r.Delete("/roles/{id}", rbacHandler.DeleteRole)
+				r.Put("/roles/{id}/permissions", rbacHandler.SetPermissions)
+				// Permissions
+				r.Get("/permissions", rbacHandler.ListPermissions)
+				// Email logs
+				r.Get("/emails", rbacHandler.ListEmailLogs)
+			})
 
 			// Profile & sessions
 			r.Get("/me", userHandler.GetProfile)

@@ -4,10 +4,40 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/404nfid/go-svelte-starter-kit/pkg/token"
 )
+
+// PermissionChecker resolves the full set of permissions for a slice of role names.
+// Implemented by rbac.Service with Redis caching.
+type PermissionChecker interface {
+	GetPermissionsForRoles(ctx context.Context, roles []string) ([]string, error)
+}
+
+// RequirePermission returns a middleware that checks whether the authenticated user
+// has the given permission string (e.g. "users:write"). It resolves permissions via
+// the PermissionChecker (typically rbac.Service with Redis caching).
+func RequirePermission(checker PermissionChecker, required string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := GetClaims(r)
+			if claims == nil {
+				respondUnauthorized(w, "missing_claims", "Unauthorized")
+				return
+			}
+
+			perms, err := checker.GetPermissionsForRoles(r.Context(), claims.Roles)
+			if err != nil || !slices.Contains(perms, required) {
+				respondForbidden(w)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 type contextKey string
 

@@ -5,6 +5,7 @@ export interface User {
 	avatar_url: string | null;
 	email_verified_at: string | null;
 	two_fa_enabled: boolean;
+	roles: string[];
 	created_at: string;
 }
 
@@ -86,6 +87,59 @@ export interface NotificationListResponse {
 
 export interface UnreadCountResponse {
 	count: number;
+}
+
+export interface Permission {
+	id: string;
+	name: string;
+	description: string | null;
+	created_at: string;
+}
+
+export interface Role {
+	id: string;
+	name: string;
+	description: string | null;
+	permissions: Permission[];
+	created_at: string;
+	updated_at: string;
+}
+
+export interface AdminUser {
+	id: string;
+	email: string;
+	display_name: string;
+	avatar_url: string | null;
+	email_verified_at: string | null;
+	two_fa_enabled: boolean;
+	roles: string[];
+	created_at: string;
+}
+
+export interface AdminUsersResponse {
+	users: AdminUser[];
+	total: number;
+	page: number;
+	limit: number;
+}
+
+export interface EmailLog {
+	id: string;
+	user_id: string | null;
+	template: string;
+	recipient: string;
+	status: string;
+	error: string;
+	attempts: number;
+	sent_at: string | null;
+	created_at: string;
+}
+
+export interface EmailLogsResponse {
+	logs: EmailLog[];
+	total: number;
+	page: number;
+	limit: number;
 }
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
