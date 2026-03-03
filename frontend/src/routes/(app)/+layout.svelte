@@ -4,7 +4,10 @@
 	import { authStore, currentUser, isLoading } from '$stores/auth';
 	import { authApi } from '$api/auth';
 	import { toast } from '$stores/toast';
-	import { onMount } from 'svelte';
+	import { notificationStore, unreadCount } from '$stores/notification';
+	import { wsStore } from '$stores/ws';
+	import { notificationApi } from '$api/notification';
+	import { onMount, onDestroy } from 'svelte';
 	import {
 		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut, Menu, X
 	} from 'lucide-svelte';
@@ -28,12 +31,20 @@
 
 	onMount(() => {
 		const unsub = isLoading.subscribe((loading) => {
-			if (!loading && !$currentUser) {
-				goto('/login');
-				unsub();
+			if (!loading) {
+				if (!$currentUser) {
+					goto('/login');
+					unsub();
+				} else {
+					wsStore.connect($authStore.accessToken!);
+					notificationApi.unreadCount().then((r) => notificationStore.setCount(r.count)).catch(() => {});
+					unsub();
+				}
 			}
 		});
 	});
+
+	onDestroy(() => wsStore.disconnect());
 
 	async function handleLogout() {
 		try {
@@ -110,6 +121,11 @@
 					>
 						<svelte:component this={item.icon} class="h-4 w-4 shrink-0" />
 						{item.label}
+						{#if item.href === '/notifications' && $unreadCount > 0}
+							<span class="ml-auto text-xs font-bold bg-[var(--color-destructive)] text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-tight">
+								{$unreadCount > 99 ? '99+' : $unreadCount}
+							</span>
+						{/if}
 					</a>
 				{/each}
 

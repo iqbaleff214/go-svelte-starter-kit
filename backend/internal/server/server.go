@@ -11,7 +11,9 @@ import (
 	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
+	"github.com/404nfid/go-svelte-starter-kit/internal/notification"
 	"github.com/404nfid/go-svelte-starter-kit/internal/user"
+	"github.com/404nfid/go-svelte-starter-kit/internal/ws"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
 	rdb "github.com/404nfid/go-svelte-starter-kit/pkg/redis"
@@ -97,6 +99,15 @@ func (s *Server) routes() http.Handler {
 	userSvc := user.NewService(userRepo, s.cfg.App.URL)
 	userHandler := user.NewHandler(userSvc, v)
 
+	// ---- WebSocket Hub ----
+	hub := ws.NewHub()
+	go hub.Run()
+
+	// ---- Notifications ----
+	notifRepo := notification.NewRepository(s.db)
+	notifSvc := notification.NewService(notifRepo, hub)
+	notifHandler := notification.NewHandler(notifSvc, v)
+
 	// ---- Static file serving (avatars) ----
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
@@ -104,6 +115,9 @@ func (s *Server) routes() http.Handler {
 		// Health checks
 		r.Get("/health", s.handleHealth)
 		r.Get("/ready", s.handleReady)
+
+		// WebSocket — token auth via query param (browsers can't set headers on WS upgrade)
+		r.Get("/ws", hub.ServeWS(tokenManager))
 
 		// Auth routes
 		r.Route("/auth", func(r chi.Router) {
@@ -145,6 +159,13 @@ func (s *Server) routes() http.Handler {
 			r.Delete("/auth/2fa", authHandler.DisableTwoFA)
 			// Email verification resend
 			r.Post("/auth/resend-verification", authHandler.ResendVerification)
+
+			// Notifications
+			r.Get("/notifications", notifHandler.List)
+			r.Get("/notifications/unread-count", notifHandler.UnreadCount)
+			r.Patch("/notifications/{id}/read", notifHandler.MarkRead)
+			r.Patch("/notifications/read-all", notifHandler.MarkAllRead)
+			r.Post("/notifications/test", notifHandler.Test)
 
 			// Profile & sessions
 			r.Get("/me", userHandler.GetProfile)

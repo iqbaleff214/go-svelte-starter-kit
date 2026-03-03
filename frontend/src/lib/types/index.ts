@@ -77,6 +77,17 @@ export interface Notification {
 	created_at: string;
 }
 
+export interface NotificationListResponse {
+	notifications: Notification[];
+	total: number;
+	page: number;
+	limit: number;
+}
+
+export interface UnreadCountResponse {
+	count: number;
+}
+
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface Toast {
