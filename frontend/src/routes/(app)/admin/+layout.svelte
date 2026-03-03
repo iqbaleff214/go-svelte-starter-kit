@@ -14,9 +14,10 @@
 	];
 
 	onMount(() => {
-		const unsub = isLoading.subscribe((loading) => {
+		let unsub: () => void;
+		unsub = isLoading.subscribe((loading) => {
 			if (!loading) {
-				unsub();
+				unsub?.();
 				const roles = $currentUser?.roles ?? [];
 				if (!roles.includes('admin') && !roles.includes('superadmin')) {
 					goto('/dashboard');
