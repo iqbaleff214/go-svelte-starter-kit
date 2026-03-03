@@ -2,7 +2,7 @@
 	import Button from '$components/ui/Button.svelte';
 	import Input from '$components/ui/Input.svelte';
 	import { authApi } from '$api/auth';
-	import { authStore } from '$stores/auth';
+	import { authStore, preAuthToken } from '$stores/auth';
 	import { toast } from '$stores/toast';
 	import { goto } from '$app/navigation';
 	import type { ApiError, FieldError } from '$types';
@@ -23,9 +23,14 @@
 
 		try {
 			const res = await authApi.login({ email, password });
-			authStore.setAuth(res.user, res.token.access_token);
-			toast.success('Welcome back!', `Signed in as ${res.user.display_name}`);
-			goto('/dashboard');
+			if (res.two_fa_required && res.pre_auth_token) {
+				preAuthToken.set(res.pre_auth_token);
+				goto('/two-fa');
+			} else {
+				authStore.setAuth(res.user, res.token.access_token);
+				toast.success('Welcome back!', `Signed in as ${res.user.display_name}`);
+				goto('/dashboard');
+			}
 		} catch (err) {
 			const apiErr = err as ApiError;
 			if (apiErr.details) {
@@ -97,7 +102,6 @@
 		</div>
 	</div>
 
-	<!-- Google OAuth (wired in Phase 2) -->
 	<a
 		href="/api/auth/google"
 		class="flex w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-transparent px-4 py-2.5 text-sm font-medium text-[var(--color-foreground)] hover:bg-[var(--color-muted)] transition-colors"

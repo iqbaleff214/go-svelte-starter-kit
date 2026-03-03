@@ -62,8 +62,40 @@ class ApiClient {
 		});
 	}
 
-	delete<T>(path: string) {
-		return this.request<T>(path, { method: 'DELETE' });
+	delete<T>(path: string, body?: unknown) {
+		return this.request<T>(path, {
+			method: 'DELETE',
+			body: body !== undefined ? JSON.stringify(body) : undefined
+		});
+	}
+
+	async postForm<T>(path: string, form: FormData): Promise<T> {
+		// Must NOT go through request() which always adds Content-Type: application/json.
+		// Let the browser set Content-Type automatically so it includes the multipart boundary.
+		const headers: Record<string, string> = {};
+		if (this.accessToken) {
+			headers['Authorization'] = `Bearer ${this.accessToken}`;
+		}
+		const res = await fetch(`${BASE_URL}${path}`, {
+			method: 'POST',
+			body: form,
+			credentials: 'include',
+			headers
+		});
+
+		if (!res.ok) {
+			let error: ApiError = { code: 'unknown_error', message: 'An unexpected error occurred' };
+			try {
+				const body = await res.json();
+				if (body.error) error = body.error;
+			} catch {
+				// ignore parse errors
+			}
+			throw error;
+		}
+
+		if (res.status === 204) return undefined as T;
+		return res.json().then((body: ApiResponse<T>) => body.data);
 	}
 }
 

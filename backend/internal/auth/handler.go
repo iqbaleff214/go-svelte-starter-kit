@@ -1,26 +1,37 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
+	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/validator"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 const refreshTokenCookie = "refresh_token"
 
 type Handler struct {
-	svc       *Service
-	validator *validator.Validator
+	svc          *Service
+	google       *GoogleProvider
+	redis        *redis.Client
+	frontendURL  string
+	validator    *validator.Validator
 	secureCookie bool
 	refreshTTL   time.Duration
 }
 
-func NewHandler(svc *Service, v *validator.Validator, secureCookie bool, refreshTTL time.Duration) *Handler {
+func NewHandler(svc *Service, google *GoogleProvider, rdb *redis.Client, frontendURL string, v *validator.Validator, secureCookie bool, refreshTTL time.Duration) *Handler {
 	return &Handler{
 		svc:          svc,
+		google:       google,
+		redis:        rdb,
+		frontendURL:  frontendURL,
 		validator:    v,
 		secureCookie: secureCookie,
 		refreshTTL:   refreshTTL,
@@ -140,6 +151,222 @@ func (h *Handler) getRefreshToken(r *http.Request) string {
 	return ""
 }
 
+// ---- Google OAuth ----
+
+const (
+	oauthStatePrefix = "oauth:state:"
+	oauthCodePrefix  = "oauth:code:"
+	oauthStateTTL    = 10 * time.Minute
+	oauthCodeTTL     = 30 * time.Second
+)
+
+// GET /api/auth/google
+func (h *Handler) GoogleRedirect(w http.ResponseWriter, r *http.Request) {
+	state, err := randomHex(16)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Could not initiate OAuth")
+		return
+	}
+
+	if err := h.redis.Set(r.Context(), oauthStatePrefix+state, "1", oauthStateTTL).Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Could not initiate OAuth")
+		return
+	}
+
+	http.Redirect(w, r, h.google.AuthURL(state), http.StatusTemporaryRedirect)
+}
+
+// GET /api/auth/google/callback
+func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+
+	ctx := r.Context()
+
+	// Validate & consume the state token
+	key := oauthStatePrefix + state
+	if err := h.redis.GetDel(ctx, key).Err(); err != nil {
+		http.Redirect(w, r, h.frontendURL+"/login?error=oauth_state", http.StatusTemporaryRedirect)
+		return
+	}
+
+	info, err := h.google.Exchange(ctx, code)
+	if err != nil {
+		http.Redirect(w, r, h.frontendURL+"/login?error=oauth_exchange", http.StatusTemporaryRedirect)
+		return
+	}
+
+	loginResp, refreshToken, err := h.svc.LoginOrCreateWithOAuth(ctx, info, "google", r)
+	if err != nil {
+		http.Redirect(w, r, h.frontendURL+"/login?error=oauth_failed", http.StatusTemporaryRedirect)
+		return
+	}
+
+	// Store result under a one-time code
+	exchangeCode, err := randomHex(16)
+	if err != nil {
+		http.Redirect(w, r, h.frontendURL+"/login?error=internal", http.StatusTemporaryRedirect)
+		return
+	}
+
+	payload, _ := json.Marshal(map[string]string{
+		"login_resp":    mustJSON(loginResp),
+		"refresh_token": refreshToken,
+	})
+	h.redis.Set(ctx, oauthCodePrefix+exchangeCode, payload, oauthCodeTTL)
+
+	http.Redirect(w, r, h.frontendURL+"/auth/callback?code="+exchangeCode, http.StatusTemporaryRedirect)
+}
+
+// POST /api/auth/google/exchange
+func (h *Handler) ExchangeOAuthCode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Code string `json:"code"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Code == "" {
+		respondError(w, http.StatusBadRequest, "missing_code", "Code is required")
+		return
+	}
+
+	ctx := r.Context()
+	raw, err := h.redis.GetDel(ctx, oauthCodePrefix+body.Code).Bytes()
+	if err != nil {
+		respondError(w, http.StatusUnauthorized, "invalid_code", "OAuth code is invalid or expired")
+		return
+	}
+
+	var payload struct {
+		LoginResp    string `json:"login_resp"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Failed to decode OAuth payload")
+		return
+	}
+
+	var loginResp LoginResponse
+	if err := json.Unmarshal([]byte(payload.LoginResp), &loginResp); err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Failed to decode login response")
+		return
+	}
+
+	h.setRefreshCookie(w, payload.RefreshToken)
+	respondJSON(w, http.StatusOK, envelope{"data": loginResp})
+}
+
+// ---- 2FA ----
+
+// POST /api/auth/2fa/setup  (protected)
+func (h *Handler) SetupTwoFA(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	userID, err := parseUUID(claims.UserID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_user", "Invalid user ID")
+		return
+	}
+
+	resp, err := h.svc.SetupTwoFA(r.Context(), userID, claims.Email)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Could not set up 2FA")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, envelope{"data": resp})
+}
+
+// POST /api/auth/2fa/confirm  (protected)
+func (h *Handler) ConfirmTwoFA(w http.ResponseWriter, r *http.Request) {
+	var req TwoFAConfirmRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if errs := h.validator.Validate(req); len(errs) > 0 {
+		respondValidation(w, errs)
+		return
+	}
+
+	claims := middleware.GetClaims(r)
+	userID, err := parseUUID(claims.UserID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_user", "Invalid user ID")
+		return
+	}
+
+	backupCodes, err := h.svc.ConfirmTwoFA(r.Context(), userID, req.Code)
+	if err != nil {
+		if errors.Is(err, ErrTwoFAInvalid) {
+			respondError(w, http.StatusUnprocessableEntity, "invalid_code", "Invalid 2FA code")
+			return
+		}
+		if errors.Is(err, ErrTwoFAAlreadyOn) {
+			respondError(w, http.StatusConflict, "already_enabled", "2FA is already enabled")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "internal_error", "Could not enable 2FA")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, envelope{"data": TwoFAConfirmResponse{BackupCodes: backupCodes}})
+}
+
+// POST /api/auth/2fa/verify  (no auth middleware — uses pre_auth_token)
+func (h *Handler) VerifyTwoFA(w http.ResponseWriter, r *http.Request) {
+	var req TwoFAVerifyRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if errs := h.validator.Validate(req); len(errs) > 0 {
+		respondValidation(w, errs)
+		return
+	}
+
+	resp, refreshToken, err := h.svc.VerifyTwoFA(r.Context(), req, r)
+	if err != nil {
+		if errors.Is(err, ErrTwoFAInvalid) {
+			respondError(w, http.StatusUnprocessableEntity, "invalid_code", "Invalid 2FA code")
+			return
+		}
+		respondError(w, http.StatusUnauthorized, "unauthorized", "Authentication failed")
+		return
+	}
+
+	h.setRefreshCookie(w, refreshToken)
+	respondJSON(w, http.StatusOK, envelope{"data": resp})
+}
+
+// DELETE /api/auth/2fa  (protected)
+func (h *Handler) DisableTwoFA(w http.ResponseWriter, r *http.Request) {
+	var req TwoFADisableRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	claims := middleware.GetClaims(r)
+	userID, err := parseUUID(claims.UserID)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "invalid_user", "Invalid user ID")
+		return
+	}
+
+	if err := h.svc.DisableTwoFA(r.Context(), userID, req.Code, req.BackupCode); err != nil {
+		if errors.Is(err, ErrTwoFAInvalid) {
+			respondError(w, http.StatusUnprocessableEntity, "invalid_code", "Invalid code or backup code")
+			return
+		}
+		if errors.Is(err, ErrTwoFANotEnabled) {
+			respondError(w, http.StatusConflict, "not_enabled", "2FA is not enabled")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "internal_error", "Could not disable 2FA")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "2FA disabled"}})
+}
+
 // ---- response helpers ----
 
 type envelope map[string]any
@@ -178,4 +405,21 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
+}
+
+func randomHex(n int) (string, error) {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func mustJSON(v any) string {
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
+func parseUUID(s string) (uuid.UUID, error) {
+	return uuid.Parse(s)
 }

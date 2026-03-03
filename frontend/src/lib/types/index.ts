@@ -17,6 +17,37 @@ export interface TokenResponse {
 export interface LoginResponse {
 	user: User;
 	token: TokenResponse;
+	two_fa_required?: boolean;
+	pre_auth_token?: string;
+}
+
+export interface Session {
+	id: string;
+	user_agent: string;
+	ip_address: string;
+	last_seen_at: string;
+	created_at: string;
+	is_current: boolean;
+}
+
+export interface TwoFASetupResponse {
+	secret: string;
+	otpauth_url: string;
+}
+
+export interface TwoFAConfirmResponse {
+	backup_codes: string[];
+}
+
+export interface ProfileResponse {
+	id: string;
+	email: string;
+	display_name: string;
+	avatar_url: string | null;
+	bio: string | null;
+	email_verified_at: string | null;
+	two_fa_enabled: boolean;
+	created_at: string;
 }
 
 export interface ApiError {

@@ -5,15 +5,17 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
+	"github.com/404nfid/go-svelte-starter-kit/internal/user"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
+	rdb "github.com/404nfid/go-svelte-starter-kit/pkg/redis"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/token"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/validator"
-	rdb "github.com/404nfid/go-svelte-starter-kit/pkg/redis"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -49,6 +51,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) routes() http.Handler {
+	// Ensure uploads directory exists
+	_ = os.MkdirAll("uploads/avatars", 0755)
+
 	r := chi.NewRouter()
 
 	// Global middleware
@@ -73,10 +78,22 @@ func (s *Server) routes() http.Handler {
 		s.cfg.JWT.RefreshTTL,
 	)
 
-	// ---- Auth routes ----
+	// ---- Auth ----
 	authRepo := auth.NewRepository(s.db)
 	authSvc := auth.NewService(authRepo, tokenManager, s.cfg.JWT.AccessTTL, s.cfg.JWT.RefreshTTL)
-	authHandler := auth.NewHandler(authSvc, v, s.cfg.IsProduction(), s.cfg.JWT.RefreshTTL)
+	googleProvider := auth.NewGoogleProvider(s.cfg.Google)
+	authHandler := auth.NewHandler(
+		authSvc, googleProvider, s.redis.Client, s.cfg.App.FrontendURL,
+		v, s.cfg.IsProduction(), s.cfg.JWT.RefreshTTL,
+	)
+
+	// ---- User ----
+	userRepo := user.NewRepository(s.db)
+	userSvc := user.NewService(userRepo, s.cfg.App.URL)
+	userHandler := user.NewHandler(userSvc, v)
+
+	// ---- Static file serving (avatars) ----
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
 	r.Route("/api", func(r chi.Router) {
 		// Health checks
@@ -85,18 +102,24 @@ func (s *Server) routes() http.Handler {
 
 		// Auth routes
 		r.Route("/auth", func(r chi.Router) {
-			// Strict limit on credential endpoints (brute-force protection)
+			// Credential endpoints — strict rate limit (brute-force protection)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RateLimit(s.cfg.Rate.AuthPerMin, time.Minute))
 				r.Post("/register", authHandler.Register)
 				r.Post("/login", authHandler.Login)
 			})
-			// Higher limit on session management (called automatically by the frontend)
+			// Session management — higher rate limit (called automatically by the frontend)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RateLimit(s.cfg.Rate.APIPerMin, time.Minute))
 				r.Post("/refresh", authHandler.Refresh)
 				r.Post("/logout", authHandler.Logout)
 			})
+			// Google OAuth (no rate limit — redirects, not JSON endpoints)
+			r.Get("/google", authHandler.GoogleRedirect)
+			r.Get("/google/callback", authHandler.GoogleCallback)
+			r.Post("/google/exchange", authHandler.ExchangeOAuthCode)
+			// 2FA verify (no auth middleware — uses pre_auth_token)
+			r.Post("/2fa/verify", authHandler.VerifyTwoFA)
 		})
 
 		// Protected routes
@@ -104,8 +127,20 @@ func (s *Server) routes() http.Handler {
 			r.Use(middleware.Authenticate(tokenManager))
 			r.Use(middleware.RateLimit(s.cfg.Rate.APIPerMin, time.Minute))
 
-			// Placeholder — domains added in later phases
-			r.Get("/me", s.handleMe)
+			// 2FA management
+			r.Post("/auth/2fa/setup", authHandler.SetupTwoFA)
+			r.Post("/auth/2fa/confirm", authHandler.ConfirmTwoFA)
+			r.Delete("/auth/2fa", authHandler.DisableTwoFA)
+
+			// Profile & sessions
+			r.Get("/me", userHandler.GetProfile)
+			r.Patch("/me", userHandler.UpdateProfile)
+			r.Post("/me/avatar", userHandler.UploadAvatar)
+			r.Post("/me/change-password", userHandler.ChangePassword)
+			r.Delete("/me", userHandler.DeleteAccount)
+			r.Get("/me/sessions", userHandler.ListSessions)
+			r.Delete("/me/sessions/{id}", userHandler.RevokeSession)
+			r.Delete("/me/sessions", userHandler.RevokeAllOtherSessions)
 		})
 	})
 
@@ -132,11 +167,4 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	fmt.Fprintf(w, `{"status":%q,"db":%t,"redis":%t}`, status, dbOK, redisOK)
-}
-
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.GetClaims(r)
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"data":{"id":%q,"email":%q,"roles":%v}}`,
-		claims.UserID, claims.Email, claims.Roles)
 }

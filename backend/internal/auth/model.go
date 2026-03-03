@@ -34,6 +34,34 @@ type UserResponse struct {
 }
 
 type LoginResponse struct {
-	User  UserResponse  `json:"user"`
-	Token TokenResponse `json:"token"`
+	User          UserResponse  `json:"user,omitempty"`
+	Token         TokenResponse `json:"token,omitempty"`
+	TwoFARequired *bool         `json:"two_fa_required,omitempty"`
+	PreAuthToken  *string       `json:"pre_auth_token,omitempty"`
+}
+
+// ---- 2FA ----
+
+type TwoFASetupResponse struct {
+	Secret     string `json:"secret"`
+	OTPAuthURL string `json:"otpauth_url"`
+}
+
+type TwoFAConfirmRequest struct {
+	Code string `json:"code" validate:"required,len=6"`
+}
+
+type TwoFAConfirmResponse struct {
+	BackupCodes []string `json:"backup_codes"`
+}
+
+type TwoFAVerifyRequest struct {
+	PreAuthToken string `json:"pre_auth_token" validate:"required"`
+	Code         string `json:"code"`
+	BackupCode   string `json:"backup_code"`
+}
+
+type TwoFADisableRequest struct {
+	Code       string `json:"code"`
+	BackupCode string `json:"backup_code"`
 }

@@ -12,15 +12,17 @@ import (
 type Type string
 
 const (
-	AccessToken  Type = "access"
-	RefreshToken Type = "refresh"
+	AccessToken   Type = "access"
+	RefreshToken  Type = "refresh"
+	PreAuthToken  Type = "pre_auth"
 )
 
 type Claims struct {
-	UserID string   `json:"sub"`
-	Email  string   `json:"email"`
-	Roles  []string `json:"roles"`
-	Type   Type     `json:"type"`
+	UserID    string   `json:"sub"`
+	Email     string   `json:"email"`
+	Roles     []string `json:"roles"`
+	Type      Type     `json:"type"`
+	SessionID string   `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -45,13 +47,13 @@ func NewManager(accessSecret, refreshSecret string, accessTTL, refreshTTL time.D
 	}
 }
 
-func (m *Manager) GeneratePair(userID, email string, roles []string) (*Pair, error) {
-	access, err := m.generate(userID, email, roles, AccessToken, m.accessSecret, m.accessTTL)
+func (m *Manager) GeneratePair(userID, email string, roles []string, sessionID string) (*Pair, error) {
+	access, err := m.generate(userID, email, roles, sessionID, AccessToken, m.accessSecret, m.accessTTL)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	refresh, err := m.generate(userID, email, roles, RefreshToken, m.refreshSecret, m.refreshTTL)
+	refresh, err := m.generate(userID, email, roles, sessionID, RefreshToken, m.refreshSecret, m.refreshTTL)
 	if err != nil {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
@@ -62,13 +64,24 @@ func (m *Manager) GeneratePair(userID, email string, roles []string) (*Pair, err
 	}, nil
 }
 
-func (m *Manager) generate(userID, email string, roles []string, tokenType Type, secret string, ttl time.Duration) (string, error) {
+// GeneratePreAuth creates a short-lived token used when 2FA is required before a full login.
+func (m *Manager) GeneratePreAuth(userID, email string) (string, error) {
+	return m.generate(userID, email, nil, "", PreAuthToken, m.accessSecret, 5*time.Minute)
+}
+
+// VerifyPreAuth validates a pre-auth token and returns its claims.
+func (m *Manager) VerifyPreAuth(tokenStr string) (*Claims, error) {
+	return m.verify(tokenStr, m.accessSecret, PreAuthToken)
+}
+
+func (m *Manager) generate(userID, email string, roles []string, sessionID string, tokenType Type, secret string, ttl time.Duration) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		UserID: userID,
-		Email:  email,
-		Roles:  roles,
-		Type:   tokenType,
+		UserID:    userID,
+		Email:     email,
+		Roles:     roles,
+		Type:      tokenType,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        uuid.New().String(),
 			IssuedAt:  jwt.NewNumericDate(now),

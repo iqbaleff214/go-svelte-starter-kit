@@ -6,7 +6,7 @@
 	import { toast } from '$stores/toast';
 	import { onMount } from 'svelte';
 	import {
-		LayoutDashboard, User, Bell, Key, Bot, Shield, LogOut, Menu, X
+		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut, Menu, X
 	} from 'lucide-svelte';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
@@ -18,6 +18,7 @@
 		{ href: '/notifications', icon: Bell, label: 'Notifications' },
 		{ href: '/ai', icon: Bot, label: 'AI Assistant' },
 		{ href: '/profile', icon: User, label: 'Profile' },
+		{ href: '/profile/security', icon: Lock, label: 'Security' },
 		{ href: '/profile/api-keys', icon: Key, label: 'API Keys' }
 	];
 
@@ -44,7 +45,13 @@
 		}
 	}
 
+	// Exact match for leaf routes; prefix match for parent routes that have no dedicated child nav item
+	const exactMatchRoutes = ['/profile'];
+
 	function isActive(href: string) {
+		if (exactMatchRoutes.includes(href)) {
+			return $page.url.pathname === href;
+		}
 		return $page.url.pathname === href || $page.url.pathname.startsWith(href + '/');
 	}
 

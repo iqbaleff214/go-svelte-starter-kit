@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { LoginResponse } from '$types';
+import type { LoginResponse, TwoFASetupResponse, TwoFAConfirmResponse } from '$types';
 
 export const authApi = {
 	register(body: { display_name: string; email: string; password: string }) {
@@ -16,5 +16,25 @@ export const authApi = {
 
 	logout() {
 		return api.post<void>('/auth/logout');
+	},
+
+	googleExchange(code: string) {
+		return api.post<LoginResponse>('/auth/google/exchange', { code });
+	},
+
+	twoFaSetup() {
+		return api.post<TwoFASetupResponse>('/auth/2fa/setup');
+	},
+
+	twoFaConfirm(code: string) {
+		return api.post<TwoFAConfirmResponse>('/auth/2fa/confirm', { code });
+	},
+
+	twoFaVerify(pre_auth_token: string, code?: string, backup_code?: string) {
+		return api.post<LoginResponse>('/auth/2fa/verify', { pre_auth_token, code, backup_code });
+	},
+
+	twoFaDisable(code?: string, backup_code?: string) {
+		return api.delete<void>('/auth/2fa', { code, backup_code });
 	}
 };

@@ -46,3 +46,6 @@ export const authStore = createAuthStore();
 export const isAuthenticated = derived(authStore, ($auth) => !!$auth.user);
 export const currentUser = derived(authStore, ($auth) => $auth.user);
 export const isLoading = derived(authStore, ($auth) => $auth.loading);
+
+// Temporary store for the pre-auth token during 2FA verification
+export const preAuthToken = writable<string | null>(null);

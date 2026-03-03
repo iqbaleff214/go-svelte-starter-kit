@@ -8,6 +8,9 @@
 		disabled?: boolean;
 		required?: boolean;
 		autocomplete?: string;
+		inputmode?: 'none' | 'text' | 'decimal' | 'numeric' | 'tel' | 'search' | 'email' | 'url';
+		pattern?: string;
+		maxlength?: number;
 		class?: string;
 		id?: string;
 		oninput?: (e: Event) => void;
@@ -23,6 +26,9 @@
 		disabled = false,
 		required = false,
 		autocomplete,
+		inputmode,
+		pattern,
+		maxlength,
 		class: className = '',
 		id,
 		oninput,
@@ -47,7 +53,10 @@
 		{placeholder}
 		{disabled}
 		{required}
-		{autocomplete}
+		autocomplete={autocomplete as any}
+		{inputmode}
+		{pattern}
+		{maxlength}
 		id={inputId}
 		bind:value
 		{oninput}
