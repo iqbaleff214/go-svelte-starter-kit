@@ -181,7 +181,7 @@
 	<title>AI Assistant — StarterKit</title>
 </svelte:head>
 
-<div class="flex h-[calc(100vh-theme(spacing.16))] gap-0 -m-6 overflow-hidden">
+<div class="flex h-[calc(100vh-theme(spacing.4))] gap-0 -m-6 overflow-hidden">
 	<!-- Sidebar -->
 	<div class="w-56 shrink-0 flex flex-col border-r border-[var(--color-border)] bg-[var(--color-card)]">
 		<div class="p-3 border-b border-[var(--color-border)]">
