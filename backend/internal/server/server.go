@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/404nfid/go-svelte-starter-kit/internal/ai"
 	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
@@ -114,6 +115,19 @@ func (s *Server) routes() http.Handler {
 	rbacSvc := rbac.NewService(rbacRepo, s.redis.Client)
 	rbacHandler := rbac.NewHandler(rbacSvc, emailRepo, v)
 
+	// ---- AI ----
+	aiRepo := ai.NewRepository(s.db)
+	aiSvc := ai.NewService(aiRepo, s.cfg.AI, notifRepo, rbacRepo)
+	aiHandler := ai.NewHandler(aiSvc, v)
+
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = aiSvc.PurgeOldConversations(context.Background())
+		}
+	}()
+
 	// ---- Static file serving (avatars) ----
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
@@ -192,6 +206,14 @@ func (s *Server) routes() http.Handler {
 				r.Get("/permissions", rbacHandler.ListPermissions)
 				// Email logs
 				r.Get("/emails", rbacHandler.ListEmailLogs)
+			})
+
+			// AI
+			r.Route("/ai", func(r chi.Router) {
+				r.Post("/chat", aiHandler.Chat)
+				r.Get("/conversations", aiHandler.ListConversations)
+				r.Get("/conversations/{id}", aiHandler.GetConversation)
+				r.Delete("/conversations/{id}", aiHandler.DeleteConversation)
 			})
 
 			// Profile & sessions

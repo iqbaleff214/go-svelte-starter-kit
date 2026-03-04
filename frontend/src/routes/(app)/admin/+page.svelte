@@ -45,7 +45,7 @@
 
 	{#if loading}
 		<div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-			{#each Array(4) as _}
+			{#each [0, 1, 2, 3] as i (i)}
 				<div class="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] p-5 animate-pulse">
 					<div class="h-8 w-8 rounded-[var(--radius)] bg-[var(--color-muted)] mb-3"></div>
 					<div class="h-7 w-12 bg-[var(--color-muted)] rounded mb-1"></div>

@@ -142,6 +142,30 @@ export interface EmailLogsResponse {
 	limit: number;
 }
 
+export interface ChatMessage {
+	role: 'user' | 'assistant';
+	content: string;
+}
+
+export interface Conversation {
+	id: string;
+	title: string;
+	model: string;
+	messages: ChatMessage[];
+	token_usage: number;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface ConversationSummary {
+	id: string;
+	title: string;
+	model: string;
+	token_usage: number;
+	updated_at: string;
+	created_at: string;
+}
+
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface Toast {

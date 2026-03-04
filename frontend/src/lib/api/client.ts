@@ -9,6 +9,10 @@ class ApiClient {
 		this.accessToken = token;
 	}
 
+	getAccessToken(): string | null {
+		return this.accessToken;
+	}
+
 	private headers(): HeadersInit {
 		const headers: Record<string, string> = {
 			'Content-Type': 'application/json'

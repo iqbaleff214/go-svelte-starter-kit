@@ -62,8 +62,10 @@ type EmailConfig struct {
 }
 
 type AIConfig struct {
-	AnthropicKey string
-	Model        string
+	AnthropicKey    string
+	Model           string
+	SystemPrompt    string
+	ConversationTTL time.Duration
 }
 
 type RateConfig struct {
@@ -112,8 +114,10 @@ func Load() (*Config, error) {
 			Provider:    getEnv("EMAIL_PROVIDER", "smtp"),
 		},
 		AI: AIConfig{
-			AnthropicKey: getEnv("ANTHROPIC_API_KEY", ""),
-			Model:        getEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+			AnthropicKey:    getEnv("ANTHROPIC_API_KEY", ""),
+			Model:           getEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
+			SystemPrompt:    getEnv("AI_SYSTEM_PROMPT", "You are a helpful AI assistant integrated into a web application. You have access to tools to help users."),
+			ConversationTTL: getEnvDuration("AI_CONVERSATION_TTL", 30*24*time.Hour),
 		},
 		Rate: RateConfig{
 			AuthPerMin: getEnvInt("RATE_LIMIT_AUTH", 5),
