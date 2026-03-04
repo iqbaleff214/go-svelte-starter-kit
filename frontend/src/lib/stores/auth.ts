@@ -1,6 +1,5 @@
 import { writable, derived } from 'svelte/store';
 import type { User } from '$types';
-import { api } from '$api/client';
 
 interface AuthState {
 	user: User | null;
@@ -19,7 +18,6 @@ function createAuthStore() {
 		subscribe,
 
 		setAuth(user: User, accessToken: string) {
-			api.setAccessToken(accessToken);
 			// Decode JWT payload to extract roles (browser-side; no signature verification needed)
 			try {
 				const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
@@ -31,7 +29,6 @@ function createAuthStore() {
 		},
 
 		clearAuth() {
-			api.setAccessToken(null);
 			set({ user: null, accessToken: null, loading: false });
 		},
 
