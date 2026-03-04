@@ -9,12 +9,10 @@
 	import { notificationApi } from '$api/notification';
 	import { onMount, onDestroy } from 'svelte';
 	import {
-		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut, Menu, X
+		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut
 	} from 'lucide-svelte';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
-
-	let sidebarOpen = $state(false);
 
 	const navItems = [
 		{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -27,6 +25,14 @@
 
 	const adminItems = [
 		{ href: '/admin', icon: Shield, label: 'Admin' }
+	];
+
+	// Condensed items for mobile bottom tab bar (max 5 slots)
+	const bottomTabItems = [
+		{ href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
+		{ href: '/notifications', icon: Bell, label: 'Alerts' },
+		{ href: '/ai', icon: Bot, label: 'AI' },
+		{ href: '/profile', icon: User, label: 'Profile' }
 	];
 
 	onMount(() => {
@@ -56,7 +62,6 @@
 		}
 	}
 
-	// Exact match for leaf routes; prefix match for parent routes that have no dedicated child nav item
 	const exactMatchRoutes = ['/profile'];
 
 	function isActive(href: string) {
@@ -69,6 +74,10 @@
 	function getInitials(name: string) {
 		return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
 	}
+
+	function isAdmin() {
+		return $currentUser && ['admin', 'superadmin'].some((r) => ($currentUser as any).roles?.includes(r));
+	}
 </script>
 
 {#if $isLoading}
@@ -80,23 +89,8 @@
 	</div>
 {:else if $currentUser}
 	<div class="h-screen overflow-hidden bg-[var(--color-background)] flex">
-		<!-- Sidebar overlay (mobile) -->
-		{#if sidebarOpen}
-			<button
-				class="fixed inset-0 z-20 bg-black/40 lg:hidden"
-				onclick={() => (sidebarOpen = false)}
-				aria-label="Close sidebar"
-			></button>
-		{/if}
-
-		<!-- Sidebar -->
-		<aside
-			class="
-				fixed top-0 left-0 z-30 h-full w-64 border-r border-[var(--color-border)]
-				bg-[var(--color-card)] flex flex-col transition-transform duration-200
-				{sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:static lg:z-auto
-			"
-		>
+		<!-- Desktop sidebar (hidden on mobile) -->
+		<aside class="hidden lg:flex lg:flex-col w-64 border-r border-[var(--color-border)] bg-[var(--color-card)] shrink-0">
 			<!-- Logo -->
 			<div class="flex h-16 items-center px-5 border-b border-[var(--color-border)] shrink-0">
 				<a href="/" class="flex items-center gap-2 font-bold text-[var(--color-foreground)]">
@@ -110,7 +104,6 @@
 				{#each navItems as item}
 					<a
 						href={item.href}
-						onclick={() => (sidebarOpen = false)}
 						class="
 							flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5 text-sm font-medium
 							transition-colors
@@ -129,7 +122,7 @@
 					</a>
 				{/each}
 
-				{#if $currentUser && ['admin', 'superadmin'].some((r) => ($currentUser as any).roles?.includes(r))}
+				{#if isAdmin()}
 					<div class="my-2 border-t border-[var(--color-border)]"></div>
 					{#each adminItems as item}
 						<a
@@ -170,21 +163,49 @@
 
 		<!-- Main content -->
 		<div class="flex-1 flex flex-col min-w-0">
-			<!-- Top bar (mobile) -->
-			<header class="flex h-16 items-center gap-3 border-b border-[var(--color-border)] px-4 lg:hidden shrink-0">
-				<button
-					onclick={() => (sidebarOpen = true)}
-					class="rounded p-2 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] transition-colors"
-					aria-label="Open sidebar"
-				>
-					<Menu class="h-5 w-5" />
-				</button>
-				<span class="font-semibold text-[var(--color-foreground)]">StarterKit</span>
-			</header>
-
-			<main class="flex-1 overflow-auto p-4 sm:p-6 lg:p-8">
+			<!-- Extra bottom padding on mobile to avoid overlap with bottom tab bar -->
+			<main class="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 pb-20 lg:pb-8">
 				{@render children()}
 			</main>
 		</div>
 	</div>
+
+	<!-- Mobile bottom tab bar (hidden on lg+) -->
+	<nav class="fixed bottom-0 left-0 right-0 z-30 flex border-t border-[var(--color-border)] bg-[var(--color-card)] lg:hidden">
+		{#each bottomTabItems as item}
+			<a
+				href={item.href}
+				class="
+					flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5
+					text-xs font-medium transition-colors min-h-[56px]
+					{isActive(item.href)
+						? 'text-[var(--color-primary)]'
+						: 'text-[var(--color-muted-fg)]'}
+				"
+			>
+				<div class="relative">
+					<svelte:component this={item.icon} class="h-5 w-5" />
+					{#if item.href === '/notifications' && $unreadCount > 0}
+						<span class="absolute -top-1 -right-1.5 text-[10px] font-bold bg-[var(--color-destructive)] text-white rounded-full w-4 h-4 flex items-center justify-center leading-none">
+							{$unreadCount > 9 ? '9+' : $unreadCount}
+						</span>
+					{/if}
+				</div>
+				<span>{item.label}</span>
+			</a>
+		{/each}
+		{#if isAdmin()}
+			<a
+				href="/admin"
+				class="
+					flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5
+					text-xs font-medium transition-colors min-h-[56px]
+					{isActive('/admin') ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-fg)]'}
+				"
+			>
+				<Shield class="h-5 w-5" />
+				<span>Admin</span>
+			</a>
+		{/if}
+	</nav>
 {/if}
