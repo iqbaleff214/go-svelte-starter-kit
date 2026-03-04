@@ -69,8 +69,9 @@ type AIConfig struct {
 }
 
 type RateConfig struct {
-	AuthPerMin int
-	APIPerMin  int
+	AuthPerMin    int
+	APIPerMin     int
+	APIKeyPerMin  int
 }
 
 func Load() (*Config, error) {
@@ -120,8 +121,9 @@ func Load() (*Config, error) {
 			ConversationTTL: getEnvDuration("AI_CONVERSATION_TTL", 30*24*time.Hour),
 		},
 		Rate: RateConfig{
-			AuthPerMin: getEnvInt("RATE_LIMIT_AUTH", 5),
-			APIPerMin:  getEnvInt("RATE_LIMIT_API", 100),
+			AuthPerMin:   getEnvInt("RATE_LIMIT_AUTH", 5),
+			APIPerMin:    getEnvInt("RATE_LIMIT_API", 100),
+			APIKeyPerMin: getEnvInt("RATE_LIMIT_API_KEY", 60),
 		},
 	}
 

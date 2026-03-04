@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,12 +10,14 @@ import (
 	"time"
 
 	"github.com/404nfid/go-svelte-starter-kit/internal/ai"
+	"github.com/404nfid/go-svelte-starter-kit/internal/apikey"
 	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
 	"github.com/404nfid/go-svelte-starter-kit/internal/notification"
 	"github.com/404nfid/go-svelte-starter-kit/internal/rbac"
 	"github.com/404nfid/go-svelte-starter-kit/internal/user"
+	"github.com/404nfid/go-svelte-starter-kit/internal/webhook"
 	"github.com/404nfid/go-svelte-starter-kit/internal/ws"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
@@ -24,7 +27,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 )
+
+//go:embed openapi.yaml
+var openAPISpec []byte
 
 type Server struct {
 	cfg    *config.Config
@@ -53,6 +60,34 @@ func (s *Server) Start() error {
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.http.Shutdown(ctx)
+}
+
+// apikeyAdapter wraps *apikey.Service to satisfy middleware.APIKeyValidator
+// without creating an import cycle (apikey/handler.go already imports middleware).
+type apikeyAdapter struct {
+	svc *apikey.Service
+}
+
+func (a *apikeyAdapter) ValidateKey(ctx context.Context, rawKey string) (middleware.APIKeyValidated, error) {
+	vk, err := a.svc.ValidateKey(ctx, rawKey)
+	if err != nil {
+		return middleware.APIKeyValidated{}, err
+	}
+	return middleware.APIKeyValidated{
+		ID:     vk.ID,
+		UserID: vk.UserID,
+		Email:  vk.Email,
+		Roles:  vk.Roles,
+		Scopes: vk.Scopes,
+	}, nil
+}
+
+func (a *apikeyAdapter) CheckRateLimit(ctx context.Context, keyID uuid.UUID) error {
+	return a.svc.CheckRateLimit(ctx, keyID)
+}
+
+func (a *apikeyAdapter) LogUsage(keyID uuid.UUID, method, path, ip string, statusCode int) {
+	a.svc.LogUsage(keyID, method, path, ip, statusCode)
 }
 
 func (s *Server) routes() http.Handler {
@@ -128,8 +163,25 @@ func (s *Server) routes() http.Handler {
 		}
 	}()
 
+	// ---- API Keys ----
+	apikeyRepo := apikey.NewRepository(s.db)
+	apikeySvc := apikey.NewService(apikeyRepo, s.redis.Client, s.cfg.Rate.APIKeyPerMin)
+	apikeyHandler := apikey.NewHandler(apikeySvc, v)
+	apikeyAdapt := &apikeyAdapter{svc: apikeySvc}
+
+	// ---- Webhooks ----
+	webhookRepo := webhook.NewRepository(s.db)
+	webhookHandler := webhook.NewHandler(webhookRepo, v)
+
 	// ---- Static file serving (avatars) ----
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
+
+	// ---- OpenAPI docs (public) ----
+	r.Get("/api/docs", serveSwaggerUI)
+	r.Get("/api/docs/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		_, _ = w.Write(openAPISpec)
+	})
 
 	r.Route("/api", func(r chi.Router) {
 		// Health checks
@@ -168,7 +220,7 @@ func (s *Server) routes() http.Handler {
 			})
 		})
 
-		// Protected routes
+		// JWT-authenticated routes
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.Authenticate(tokenManager))
 			r.Use(middleware.RateLimit(s.cfg.Rate.APIPerMin, time.Minute))
@@ -225,10 +277,64 @@ func (s *Server) routes() http.Handler {
 			r.Get("/me/sessions", userHandler.ListSessions)
 			r.Delete("/me/sessions/{id}", userHandler.RevokeSession)
 			r.Delete("/me/sessions", userHandler.RevokeAllOtherSessions)
+
+			// API key management (JWT-authenticated)
+			r.Route("/me/api-keys", func(r chi.Router) {
+				r.Post("/", apikeyHandler.CreateKey)
+				r.Get("/", apikeyHandler.ListKeys)
+				r.Delete("/{id}", apikeyHandler.RevokeKey)
+				r.Get("/{id}/logs", apikeyHandler.ListLogs)
+			})
+
+			// Webhook management (JWT-authenticated)
+			r.Route("/me/webhooks", func(r chi.Router) {
+				r.Post("/", webhookHandler.Create)
+				r.Get("/", webhookHandler.List)
+				r.Delete("/{id}", webhookHandler.Delete)
+			})
+		})
+
+		// API key-authenticated public API (/api/v1/*)
+		r.Route("/v1", func(r chi.Router) {
+			r.Use(middleware.AuthenticateAPIKey(apikeyAdapt))
+
+			r.With(middleware.RequireScope("read:profile")).Get("/me", userHandler.GetProfile)
+			r.With(middleware.RequireScope("write:profile")).Patch("/me", userHandler.UpdateProfile)
+			r.With(middleware.RequireScope("read:notifications")).Get("/notifications", notifHandler.List)
+			r.With(middleware.RequireScope("write:notifications")).Patch("/notifications/{id}/read", notifHandler.MarkRead)
+			r.With(middleware.RequireScope("read:users")).Get("/users", rbacHandler.ListUsers)
+			r.With(middleware.RequireScope("read:webhooks")).Get("/webhooks", webhookHandler.List)
+			r.With(middleware.RequireScope("write:webhooks")).Post("/webhooks", webhookHandler.Create)
+			r.With(middleware.RequireScope("write:webhooks")).Delete("/webhooks/{id}", webhookHandler.Delete)
 		})
 	})
 
 	return r
+}
+
+// serveSwaggerUI returns a minimal HTML page that loads Swagger UI from CDN.
+func serveSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = fmt.Fprint(w, `<!DOCTYPE html>
+<html>
+<head>
+  <title>API Docs</title>
+  <meta charset="utf-8"/>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+  SwaggerUIBundle({
+    url: "/api/docs/openapi.yaml",
+    dom_id: "#swagger-ui",
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+    layout: "BaseLayout"
+  });
+</script>
+</body>
+</html>`)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

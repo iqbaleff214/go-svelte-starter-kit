@@ -166,6 +166,40 @@ export interface ConversationSummary {
 	created_at: string;
 }
 
+export interface APIKey {
+	id: string;
+	name: string;
+	key_prefix: string;
+	scopes: string[];
+	last_used_at: string | null;
+	expires_at: string | null;
+	revoked_at: string | null;
+	created_at: string;
+}
+
+export interface APIKeyCreateResponse extends APIKey {
+	key: string; // plaintext — shown once only
+}
+
+export interface APIKeyLog {
+	id: string;
+	api_key_id: string;
+	method: string;
+	path: string;
+	status_code: number;
+	ip: string;
+	created_at: string;
+}
+
+export interface Webhook {
+	id: string;
+	url: string;
+	events: string[];
+	active: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface Toast {
