@@ -55,9 +55,10 @@ make migrate
 make dev
 ```
 
-- Backend API: http://localhost:8080
-- Frontend: http://localhost:5173
-- API Docs (Swagger UI): http://localhost:8080/api/docs
+- Dev (frontend + Vite proxy): http://localhost:5173
+- Dev (backend direct): http://localhost:8080
+- Production (via nginx): http://localhost — API at `/api`, frontend at `/`
+- API Docs (Swagger UI): http://localhost/api/docs (prod) or http://localhost:8080/api/docs (dev)
 
 ---
 

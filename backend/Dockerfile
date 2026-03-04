@@ -18,23 +18,34 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/worker ./cmd/worker
 
 # ─── API runtime stage ────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12 AS api
+FROM alpine:3.20 AS api
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /out/api /api
-COPY --from=builder /app/migrations /migrations
-COPY --from=builder /app/templates /templates
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S app && adduser -S app -G app
+
+WORKDIR /app
+
+COPY --from=builder /out/api ./api
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/templates ./templates
+
+# Pre-create uploads directory so the app can write on first boot
+RUN mkdir -p uploads/avatars && chown -R app:app uploads
 
 EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/api"]
+USER app
+ENTRYPOINT ["/app/api"]
 
 # ─── Worker runtime stage ─────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12 AS worker
+FROM alpine:3.20 AS worker
 
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /out/worker /worker
-COPY --from=builder /app/templates /templates
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S app && adduser -S app -G app
 
-USER nonroot:nonroot
-ENTRYPOINT ["/worker"]
+WORKDIR /app
+
+COPY --from=builder /out/worker ./worker
+COPY --from=builder /app/templates ./templates
+
+USER app
+ENTRYPOINT ["/app/worker"]
