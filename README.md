@@ -1,6 +1,6 @@
 # Go + SvelteKit Starter Kit
 
-![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
 ![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-FF3E00?logo=svelte&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
