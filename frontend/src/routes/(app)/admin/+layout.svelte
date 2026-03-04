@@ -32,7 +32,7 @@
 	}
 </script>
 
-<div class="max-w-6xl mx-auto">
+<div class="max-w-6xl">
 	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-[var(--color-foreground)] mb-4">Admin Panel</h1>
 		<div class="flex gap-1 border-b border-[var(--color-border)]">

@@ -142,21 +142,23 @@
 	<title>API Keys — StarterKit</title>
 </svelte:head>
 
-<div class="max-w-4xl mx-auto space-y-6">
-	<div class="flex items-center justify-between">
-		<div>
-			<h1 class="text-2xl font-bold text-[var(--color-foreground)]">API Keys</h1>
-			<p class="text-sm text-[var(--color-muted-fg)] mt-1">
-				Use API keys to authenticate against <code class="text-xs bg-[var(--color-muted)] px-1 py-0.5 rounded">/api/v1/*</code> endpoints.
-			</p>
+<div class="max-w-4xl space-y-6">
+	<div class="mb-6">
+		<div class="flex items-center justify-between">
+			<div>
+				<h1 class="text-2xl font-bold text-[var(--color-foreground)]">API Keys</h1>
+				<p class="mt-1 text-sm text-[var(--color-muted-fg)]">
+					Authenticate against <code class="text-xs bg-[var(--color-muted)] px-1 py-0.5 rounded">/api/v1/*</code> endpoints.
+				</p>
+			</div>
+			<button
+				onclick={() => (showCreate = !showCreate)}
+				class="flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[var(--color-primary)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
+			>
+				<Plus class="h-4 w-4" />
+				New key
+			</button>
 		</div>
-		<button
-			onclick={() => (showCreate = !showCreate)}
-			class="flex items-center gap-2 px-4 py-2 rounded-[var(--radius)] bg-[var(--color-primary)] text-white text-sm font-medium hover:opacity-90 transition-opacity"
-		>
-			<Plus class="h-4 w-4" />
-			New key
-		</button>
 	</div>
 
 	<!-- Create form -->

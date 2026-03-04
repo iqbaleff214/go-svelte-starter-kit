@@ -40,7 +40,7 @@
 
 <div class="max-w-4xl">
 	<!-- Header -->
-	<div class="mb-8">
+	<div class="mb-6">
 		<h1 class="text-2xl font-bold text-[var(--color-foreground)]">
 			Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'},
 			{$currentUser?.display_name?.split(' ')[0] ?? 'there'} 👋

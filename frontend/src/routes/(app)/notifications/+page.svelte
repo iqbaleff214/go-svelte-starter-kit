@@ -79,17 +79,22 @@
 	<title>Notifications — StarterKit</title>
 </svelte:head>
 
-<div class="max-w-2xl mx-auto">
-	<div class="flex items-center justify-between mb-6">
-		<h1 class="text-2xl font-bold text-[var(--color-foreground)]">Notifications</h1>
-		{#if $notificationsList.some((n) => !n.read_at)}
-			<button
-				onclick={handleMarkAllRead}
-				class="text-sm font-medium text-[var(--color-primary)] hover:underline"
-			>
-				Mark all as read
-			</button>
-		{/if}
+<div class="max-w-2xl">
+	<div class="mb-6">
+		<div class="flex items-center justify-between">
+			<div>
+				<h1 class="text-2xl font-bold text-[var(--color-foreground)]">Notifications</h1>
+				<p class="mt-1 text-sm text-[var(--color-muted-fg)]">Your activity and system alerts.</p>
+			</div>
+			{#if $notificationsList.some((n) => !n.read_at)}
+				<button
+					onclick={handleMarkAllRead}
+					class="text-sm font-medium text-[var(--color-primary)] hover:underline"
+				>
+					Mark all as read
+				</button>
+			{/if}
+		</div>
 	</div>
 
 	{#if loading}
