@@ -10,15 +10,15 @@ import (
 )
 
 type EmailLog struct {
-	ID        uuid.UUID
-	UserID    *uuid.UUID
-	Template  string
-	Recipient string
-	Status    string
-	Error     string
-	Attempts  int
-	SentAt    *time.Time
-	CreatedAt time.Time
+	ID        uuid.UUID  `json:"id"`
+	UserID    *uuid.UUID `json:"user_id"`
+	Template  string     `json:"template"`
+	Recipient string     `json:"recipient"`
+	Status    string     `json:"status"`
+	Error     string     `json:"error"`
+	Attempts  int        `json:"attempts"`
+	SentAt    *time.Time `json:"sent_at"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type Repository struct {
