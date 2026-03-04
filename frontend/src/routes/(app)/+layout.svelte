@@ -9,30 +9,33 @@
 	import { notificationApi } from '$api/notification';
 	import { onMount, onDestroy } from 'svelte';
 	import {
-		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut
+		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut,
+		Sun, Moon, Monitor, ChevronUp
 	} from 'lucide-svelte';
+	import { theme } from '$stores/theme';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
 
 	const navItems = [
 		{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-		{ href: '/notifications', icon: Bell, label: 'Notifications' },
-		{ href: '/ai', icon: Bot, label: 'AI Assistant' },
-		{ href: '/profile', icon: User, label: 'Profile' },
-		{ href: '/profile/security', icon: Lock, label: 'Security' },
-		{ href: '/profile/api-keys', icon: Key, label: 'API Keys' }
+		{ href: '/ai', icon: Bot, label: 'AI Assistant' }
 	];
+
+	const themeLabels: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' };
+	const themeIcons: Record<string, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
+
+	let userMenuOpen = $state(false);
+	let mobileUserMenuOpen = $state(false);
 
 	const adminItems = [
 		{ href: '/admin', icon: Shield, label: 'Admin' }
 	];
 
-	// Condensed items for mobile bottom tab bar (max 5 slots)
+	// Condensed items for mobile bottom tab bar
 	const bottomTabItems = [
 		{ href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
 		{ href: '/notifications', icon: Bell, label: 'Alerts' },
-		{ href: '/ai', icon: Bot, label: 'AI' },
-		{ href: '/profile', icon: User, label: 'Profile' }
+		{ href: '/ai', icon: Bot, label: 'AI' }
 	];
 
 	onMount(() => {
@@ -137,8 +140,59 @@
 			</nav>
 
 			<!-- User section -->
-			<div class="border-t border-[var(--color-border)] p-3 shrink-0">
-				<div class="flex items-center gap-3 px-2 py-2">
+			<div class="border-t border-[var(--color-border)] p-3 shrink-0 relative">
+				{#if userMenuOpen}
+					<!-- Backdrop -->
+					<div class="fixed inset-0 z-10" onclick={() => userMenuOpen = false}></div>
+					<!-- Dropdown menu -->
+					<div class="absolute bottom-full left-3 right-3 mb-1 z-20 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-md)] py-1 overflow-hidden">
+						<a
+							href="/profile"
+							onclick={() => userMenuOpen = false}
+							class="flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+						>
+							<User class="h-4 w-4 shrink-0" />
+							Profile
+						</a>
+						<a
+							href="/profile/security"
+							onclick={() => userMenuOpen = false}
+							class="flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+						>
+							<Lock class="h-4 w-4 shrink-0" />
+							Security
+						</a>
+						<a
+							href="/profile/api-keys"
+							onclick={() => userMenuOpen = false}
+							class="flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+						>
+							<Key class="h-4 w-4 shrink-0" />
+							API Keys
+						</a>
+						<div class="my-1 border-t border-[var(--color-border)]"></div>
+						<button
+							onclick={() => theme.cycle()}
+							class="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+						>
+							<svelte:component this={themeIcons[$theme]} class="h-4 w-4 shrink-0" />
+							<span class="flex-1 text-left">Theme: {themeLabels[$theme]}</span>
+						</button>
+						<div class="my-1 border-t border-[var(--color-border)]"></div>
+						<button
+							onclick={handleLogout}
+							class="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-destructive)] hover:bg-[var(--color-muted)] transition-colors"
+						>
+							<LogOut class="h-4 w-4 shrink-0" />
+							Sign out
+						</button>
+					</div>
+				{/if}
+				<!-- User trigger button -->
+				<button
+					onclick={() => userMenuOpen = !userMenuOpen}
+					class="w-full flex items-center gap-3 px-2 py-2 rounded-[var(--radius-sm)] hover:bg-[var(--color-muted)] transition-colors text-left"
+				>
 					<div class="h-8 w-8 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-xs font-bold text-white shrink-0">
 						{#if $currentUser.avatar_url}
 							<img src={$currentUser.avatar_url} alt="" class="h-8 w-8 rounded-full object-cover" />
@@ -150,20 +204,86 @@
 						<p class="text-sm font-medium text-[var(--color-foreground)] truncate">{$currentUser.display_name}</p>
 						<p class="text-xs text-[var(--color-muted-fg)] truncate">{$currentUser.email}</p>
 					</div>
-					<button
-						onclick={handleLogout}
-						class="shrink-0 rounded p-1.5 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-destructive)] transition-colors"
-						title="Sign out"
-					>
-						<LogOut class="h-4 w-4" />
-					</button>
-				</div>
+					<ChevronUp class="h-4 w-4 text-[var(--color-muted-fg)] shrink-0 transition-transform {userMenuOpen ? '' : 'rotate-180'}" />
+				</button>
 			</div>
 		</aside>
 
 		<!-- Main content -->
 		<div class="flex-1 flex flex-col min-w-0">
-			<!-- Extra bottom padding on mobile to avoid overlap with bottom tab bar -->
+			<!-- Topbar -->
+			<header class="h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-card)] flex items-center justify-end px-4 sm:px-6 gap-1">
+				<a
+					href="/notifications"
+					class="relative p-2 rounded-[var(--radius-sm)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+					title="Notifications"
+				>
+					<Bell class="h-5 w-5" />
+					{#if $unreadCount > 0}
+						<span class="absolute top-1 right-1 h-2 w-2 rounded-full bg-[var(--color-destructive)]"></span>
+					{/if}
+				</a>
+				<!-- Mobile user menu (hidden on desktop where sidebar handles it) -->
+				<div class="relative lg:hidden">
+					{#if mobileUserMenuOpen}
+						<div class="fixed inset-0 z-10" onclick={() => mobileUserMenuOpen = false}></div>
+						<div class="absolute right-0 top-full mt-1 z-20 w-52 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-md)] py-1 overflow-hidden">
+							<a
+								href="/profile"
+								onclick={() => mobileUserMenuOpen = false}
+								class="flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+							>
+								<User class="h-4 w-4 shrink-0" />
+								Profile
+							</a>
+							<a
+								href="/profile/security"
+								onclick={() => mobileUserMenuOpen = false}
+								class="flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+							>
+								<Lock class="h-4 w-4 shrink-0" />
+								Security
+							</a>
+							<a
+								href="/profile/api-keys"
+								onclick={() => mobileUserMenuOpen = false}
+								class="flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+							>
+								<Key class="h-4 w-4 shrink-0" />
+								API Keys
+							</a>
+							<div class="my-1 border-t border-[var(--color-border)]"></div>
+							<button
+								onclick={() => theme.cycle()}
+								class="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+							>
+								<svelte:component this={themeIcons[$theme]} class="h-4 w-4 shrink-0" />
+								<span class="flex-1 text-left">Theme: {themeLabels[$theme]}</span>
+							</button>
+							<div class="my-1 border-t border-[var(--color-border)]"></div>
+							<button
+								onclick={handleLogout}
+								class="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-destructive)] hover:bg-[var(--color-muted)] transition-colors"
+							>
+								<LogOut class="h-4 w-4 shrink-0" />
+								Sign out
+							</button>
+						</div>
+					{/if}
+					<button
+						onclick={() => mobileUserMenuOpen = !mobileUserMenuOpen}
+						class="p-1 rounded-full transition-opacity hover:opacity-80"
+					>
+						<div class="h-8 w-8 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-xs font-bold text-white shrink-0 overflow-hidden">
+							{#if $currentUser.avatar_url}
+								<img src={$currentUser.avatar_url} alt="" class="h-8 w-8 object-cover" />
+							{:else}
+								{getInitials($currentUser.display_name)}
+							{/if}
+						</div>
+					</button>
+				</div>
+			</header>
 			<main class="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 pb-20 lg:pb-8">
 				{@render children()}
 			</main>

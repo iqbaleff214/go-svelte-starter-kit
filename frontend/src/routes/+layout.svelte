@@ -5,6 +5,7 @@
 	import { authStore } from '$stores/auth';
 	import { authApi } from '$api/auth';
 	import { api } from '$api/client';
+	import { theme } from '$stores/theme';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
 
@@ -13,8 +14,11 @@
 	// circular dependency that caused "Cannot access before initialization".
 	authStore.subscribe((state) => api.setAccessToken(state.accessToken));
 
-	// Attempt silent token refresh on mount
 	onMount(async () => {
+		// Apply persisted/system theme before any rendering.
+		theme.init();
+
+		// Attempt silent token refresh.
 		try {
 			const res = await authApi.refresh();
 			authStore.setAuth(res.user, res.token.access_token);
