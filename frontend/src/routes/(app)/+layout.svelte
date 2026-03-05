@@ -26,6 +26,7 @@
 
 	const themeLabels: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' };
 	const themeIcons: Record<string, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
+	const ThemeIcon = $derived(themeIcons[$theme]);
 
 	let userMenuOpen = $state(false);
 	let mobileUserMenuOpen = $state(false);
@@ -137,6 +138,7 @@
 			<!-- Nav -->
 			<nav class="flex-1 overflow-y-auto p-2 space-y-0.5">
 				{#each navItems as item}
+					{@const NavIcon = item.icon}
 					<a
 						href={item.href}
 						title={sidebarCollapsed ? item.label : undefined}
@@ -148,7 +150,7 @@
 								: 'text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]'}
 						"
 					>
-						<svelte:component this={item.icon} class="h-4 w-4 shrink-0" />
+						<NavIcon class="h-4 w-4 shrink-0" />
 						{#if !sidebarCollapsed}{item.label}{/if}
 					</a>
 				{/each}
@@ -156,6 +158,7 @@
 				{#if isAdmin()}
 					<div class="my-2 border-t border-[var(--color-border)]"></div>
 					{#each adminItems as item}
+						{@const AdminIcon = item.icon}
 						<a
 							href={item.href}
 							title={sidebarCollapsed ? item.label : undefined}
@@ -165,7 +168,7 @@
 								{sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'}
 							"
 						>
-							<svelte:component this={item.icon} class="h-4 w-4 shrink-0" />
+							<AdminIcon class="h-4 w-4 shrink-0" />
 							{#if !sidebarCollapsed}{item.label}{/if}
 						</a>
 					{/each}
@@ -176,7 +179,7 @@
 			<div class="border-t border-[var(--color-border)] p-2 shrink-0 relative">
 				{#if userMenuOpen}
 					<!-- Backdrop -->
-					<div class="fixed inset-0 z-10" onclick={() => userMenuOpen = false}></div>
+					<div class="fixed inset-0 z-10" role="presentation" onclick={() => userMenuOpen = false} onkeydown={() => {}}></div>
 					<!-- Dropdown: upward when expanded, rightward when collapsed -->
 					<div class="absolute z-20 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-md)] py-1 overflow-hidden
 						{sidebarCollapsed ? 'bottom-2 left-full ml-2 w-52' : 'bottom-full left-2 right-2 mb-1'}">
@@ -209,7 +212,7 @@
 							onclick={() => theme.cycle()}
 							class="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
 						>
-							<svelte:component this={themeIcons[$theme]} class="h-4 w-4 shrink-0" />
+							<ThemeIcon class="h-4 w-4 shrink-0" />
 							<span class="flex-1 text-left">Theme: {themeLabels[$theme]}</span>
 						</button>
 						<div class="my-1 border-t border-[var(--color-border)]"></div>
@@ -283,7 +286,7 @@
 				<!-- Mobile user menu (hidden on desktop where sidebar handles it) -->
 				<div class="relative lg:hidden">
 					{#if mobileUserMenuOpen}
-						<div class="fixed inset-0 z-10" onclick={() => mobileUserMenuOpen = false}></div>
+						<div class="fixed inset-0 z-10" role="presentation" onclick={() => mobileUserMenuOpen = false} onkeydown={() => {}}></div>
 						<div class="absolute right-0 top-full mt-1 z-20 w-52 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-md)] py-1 overflow-hidden">
 							<a
 								href="/profile"
@@ -314,7 +317,7 @@
 								onclick={() => theme.cycle()}
 								class="w-full flex items-center gap-3 px-3 py-2 text-sm text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
 							>
-								<svelte:component this={themeIcons[$theme]} class="h-4 w-4 shrink-0" />
+								<ThemeIcon class="h-4 w-4 shrink-0" />
 								<span class="flex-1 text-left">Theme: {themeLabels[$theme]}</span>
 							</button>
 							<div class="my-1 border-t border-[var(--color-border)]"></div>
@@ -369,6 +372,7 @@
 	<!-- Mobile bottom tab bar (hidden on lg+) -->
 	<nav class="fixed bottom-0 left-0 right-0 z-30 flex border-t border-[var(--color-border)] bg-[var(--color-card)] lg:hidden">
 		{#each bottomTabItems as item}
+			{@const TabIcon = item.icon}
 			<a
 				href={item.href}
 				class="
@@ -380,7 +384,7 @@
 				"
 			>
 				<div class="relative">
-					<svelte:component this={item.icon} class="h-5 w-5" />
+					<TabIcon class="h-5 w-5" />
 					{#if item.href === '/notifications' && $unreadCount > 0}
 						<span class="absolute -top-1 -right-1.5 text-[10px] font-bold bg-[var(--color-destructive)] text-white rounded-full w-4 h-4 flex items-center justify-center leading-none">
 							{$unreadCount > 9 ? '9+' : $unreadCount}

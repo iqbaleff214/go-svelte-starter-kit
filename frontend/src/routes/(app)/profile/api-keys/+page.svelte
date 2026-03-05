@@ -167,8 +167,9 @@
 			<h2 class="font-semibold text-[var(--color-foreground)]">Create API Key</h2>
 
 			<div>
-				<label class="block text-sm font-medium text-[var(--color-foreground)] mb-1">Name</label>
+				<label for="new-key-name" class="block text-sm font-medium text-[var(--color-foreground)] mb-1">Name</label>
 				<input
+					id="new-key-name"
 					bind:value={newName}
 					type="text"
 					placeholder="e.g. My integration"
@@ -177,7 +178,7 @@
 			</div>
 
 			<div>
-				<label class="block text-sm font-medium text-[var(--color-foreground)] mb-2">Scopes</label>
+				<p class="block text-sm font-medium text-[var(--color-foreground)] mb-2">Scopes</p>
 				<div class="grid grid-cols-2 gap-2">
 					{#each ALL_SCOPES as scope}
 						<label class="flex items-start gap-2 cursor-pointer p-2 rounded-[var(--radius)] border border-[var(--color-border)] hover:bg-[var(--color-muted)] transition-colors {newScopes.includes(scope.value) ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5' : ''}">
@@ -197,10 +198,11 @@
 			</div>
 
 			<div>
-				<label class="block text-sm font-medium text-[var(--color-foreground)] mb-1">
+				<label for="new-key-expires" class="block text-sm font-medium text-[var(--color-foreground)] mb-1">
 					Expiry <span class="text-[var(--color-muted-fg)] font-normal">(optional)</span>
 				</label>
 				<input
+					id="new-key-expires"
 					bind:value={newExpires}
 					type="datetime-local"
 					class="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-background)] text-[var(--color-foreground)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"

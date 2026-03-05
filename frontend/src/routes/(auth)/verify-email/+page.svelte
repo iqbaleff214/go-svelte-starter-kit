@@ -3,24 +3,24 @@
 	import { page } from '$app/stores';
 	import { authApi } from '$api/auth';
 
-	type State = 'loading' | 'success' | 'error';
-	let state = $state<State>('loading');
+	type VerifyStatus = 'loading' | 'success' | 'error';
+	let status: VerifyStatus = $state('loading');
 	let errorMsg = $state('');
 
 	onMount(async () => {
 		const token = $page.url.searchParams.get('token') ?? '';
 		if (!token) {
 			errorMsg = 'No verification token found in the link.';
-			state = 'error';
+			status = 'error';
 			return;
 		}
 
 		try {
 			await authApi.verifyEmail(token);
-			state = 'success';
+			status = 'success';
 		} catch (err: any) {
 			errorMsg = err?.message ?? 'The verification link is invalid or has expired.';
-			state = 'error';
+			status = 'error';
 		}
 	});
 </script>
@@ -30,14 +30,14 @@
 </svelte:head>
 
 <div class="text-center">
-	{#if state === 'loading'}
+	{#if status === 'loading'}
 		<svg class="mx-auto mb-4 h-10 w-10 animate-spin text-[var(--color-primary)]" viewBox="0 0 24 24" fill="none">
 			<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
 			<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
 		</svg>
 		<p class="text-sm text-[var(--color-muted-fg)]">Verifying your email address…</p>
 
-	{:else if state === 'success'}
+	{:else if status === 'success'}
 		<div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--color-success)]/10 text-2xl">
 			✅
 		</div>

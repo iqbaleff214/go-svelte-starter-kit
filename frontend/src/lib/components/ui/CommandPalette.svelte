@@ -5,7 +5,7 @@
 	import { searchApi, type SearchResult } from '$api/search';
 	import {
 		LayoutDashboard, Bot, Bell, User, Lock, Key, Shield,
-		Search, Users, Tag, Loader
+		Search, Tag, Loader
 	} from 'lucide-svelte';
 
 	type NavAction = {
@@ -46,14 +46,19 @@
 		return visible.filter((a) => a.title.toLowerCase().includes(q) || a.subtitle.toLowerCase().includes(q));
 	}
 
-	type Group = { label: string; items: { title: string; subtitle: string; href: string; icon?: typeof Search; avatarUrl?: string | null; type: string }[] };
+	type GroupItem = { title: string; subtitle: string; href: string; icon?: typeof Search; avatarUrl?: string | null; type: string; idx: number };
+	type Group = { label: string; items: GroupItem[] };
 
 	function groups(): Group[] {
 		const result: Group[] = [];
 		const actions = filteredActions();
-		if (actions.length) result.push({ label: 'Quick Actions', items: actions.map((a) => ({ ...a, icon: a.icon })) });
-		if (users.length) result.push({ label: 'Users', items: users.map((u) => ({ title: u.title, subtitle: u.subtitle, href: u.href, avatarUrl: u.avatar_url, type: 'user' })) });
-		if (roles.length) result.push({ label: 'Roles', items: roles.map((r) => ({ title: r.title, subtitle: r.subtitle, href: r.href, type: 'role' })) });
+		if (actions.length) result.push({ label: 'Quick Actions', items: actions.map((a) => ({ ...a, icon: a.icon, idx: 0 })) });
+		if (users.length) result.push({ label: 'Users', items: users.map((u) => ({ title: u.title, subtitle: u.subtitle, href: u.href, avatarUrl: u.avatar_url, type: 'user', idx: 0 })) });
+		if (roles.length) result.push({ label: 'Roles', items: roles.map((r) => ({ title: r.title, subtitle: r.subtitle, href: r.href, type: 'role', idx: 0 })) });
+		let i = 0;
+		for (const g of result) {
+			for (const item of g.items) { item.idx = i++; }
+		}
 		return result;
 	}
 
@@ -126,8 +131,6 @@
 	function getInitials(name: string) {
 		return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
 	}
-
-	let globalIndex = 0;
 </script>
 
 {#if $commandPalette}
@@ -135,14 +138,18 @@
 	<div
 		class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-start justify-center pt-[10vh] px-4"
 		onclick={() => commandPalette.close()}
+		onkeydown={(e) => { if (e.key === 'Escape') commandPalette.close(); }}
 		role="dialog"
 		aria-modal="true"
 		aria-label="Command palette"
+		tabindex="-1"
 	>
 		<!-- Panel -->
 		<div
 			class="w-full max-w-xl rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-xl)] overflow-hidden"
 			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="presentation"
 		>
 			<!-- Search input -->
 			<div class="flex items-center gap-3 px-4 border-b border-[var(--color-border)]">
@@ -151,6 +158,7 @@
 				{:else}
 					<Search class="h-4 w-4 text-[var(--color-muted-fg)] shrink-0" />
 				{/if}
+				<!-- svelte-ignore a11y_autofocus -->
 				<input
 					type="text"
 					placeholder="Search pages, users, roles…"
@@ -172,14 +180,14 @@
 						{query.trim() ? 'No results found.' : 'Type to search…'}
 					</p>
 				{:else}
-					{@const _ = (globalIndex = 0)}
 					{#each groups() as group}
 						<div class="px-2">
 							<p class="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-muted-fg)]">
 								{group.label}
 							</p>
-							{#each group.items as item}
-								{@const idx = globalIndex++}
+							{#each group.items as item (item.idx)}
+								{@const idx = item.idx}
+								{@const Icon = item.icon}
 								<button
 									class="
 										w-full flex items-center gap-3 px-2 py-2 rounded-[var(--radius-sm)] text-left transition-colors
@@ -201,8 +209,8 @@
 											{/if}
 										{:else if item.type === 'role'}
 											<Tag class="h-3.5 w-3.5 text-[var(--color-muted-fg)]" />
-										{:else if item.icon}
-											<svelte:component this={item.icon} class="h-3.5 w-3.5 {selectedIndex === idx ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-fg)]'}" />
+										{:else if Icon}
+											<Icon class="h-3.5 w-3.5 {selectedIndex === idx ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-fg)]'}" />
 										{/if}
 									</div>
 									<div class="min-w-0 flex-1">

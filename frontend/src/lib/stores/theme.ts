@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -54,9 +54,7 @@ function createThemeStore() {
 		},
 
 		cycle() {
-			let current: Theme = 'system';
-			const unsub = subscribe((v) => (current = v));
-			unsub();
+			const current: Theme = get({ subscribe });
 			const next: Theme = current === 'light' ? 'dark' : current === 'dark' ? 'system' : 'light';
 			this.set(next);
 		}

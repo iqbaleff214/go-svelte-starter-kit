@@ -273,11 +273,15 @@
 {#if deleteTarget}
 	<div
 		class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+		role="presentation"
 		onclick={() => { deleteTarget = null; }}
+		onkeydown={(e) => { if (e.key === 'Escape') deleteTarget = null; }}
 	>
 		<div
 			class="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-card)] p-6 shadow-[var(--shadow-lg)]"
+			role="presentation"
 			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
 		>
 			<h3 class="text-base font-semibold text-[var(--color-foreground)] mb-1">Delete role</h3>
 			<p class="text-sm text-[var(--color-muted-fg)] mb-4">
