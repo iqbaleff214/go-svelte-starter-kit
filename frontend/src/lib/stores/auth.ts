@@ -1,48 +1,50 @@
-import { writable, derived } from 'svelte/store';
-import type { User } from '$types';
+import { writable, derived } from "svelte/store";
+import type { User } from "$types";
 
 interface AuthState {
-	user: User | null;
-	accessToken: string | null;
-	loading: boolean;
+  user: User | null;
+  accessToken: string | null;
+  loading: boolean;
 }
 
 function createAuthStore() {
-	const { subscribe, set, update } = writable<AuthState>({
-		user: null,
-		accessToken: null,
-		loading: true
-	});
+  const { subscribe, set, update } = writable<AuthState>({
+    user: null,
+    accessToken: null,
+    loading: true,
+  });
 
-	return {
-		subscribe,
+  return {
+    subscribe,
 
-		setAuth(user: User, accessToken: string) {
-			// Decode JWT payload to extract roles (browser-side; no signature verification needed)
-			try {
-				const payload = JSON.parse(atob(accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-				user = { ...user, roles: payload.roles ?? [] };
-			} catch {
-				user = { ...user, roles: [] };
-			}
-			set({ user, accessToken, loading: false });
-		},
+    setAuth(user: User, accessToken: string) {
+      // Decode JWT payload to extract roles (browser-side; no signature verification needed)
+      try {
+        const payload = JSON.parse(
+          atob(accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")),
+        );
+        user = { ...user, roles: payload.roles ?? [] };
+      } catch {
+        user = { ...user, roles: [] };
+      }
+      set({ user, accessToken, loading: false });
+    },
 
-		clearAuth() {
-			set({ user: null, accessToken: null, loading: false });
-		},
+    clearAuth() {
+      set({ user: null, accessToken: null, loading: false });
+    },
 
-		setLoading(loading: boolean) {
-			update((s) => ({ ...s, loading }));
-		},
+    setLoading(loading: boolean) {
+      update((s) => ({ ...s, loading }));
+    },
 
-		updateUser(user: Partial<User>) {
-			update((s) => ({
-				...s,
-				user: s.user ? { ...s.user, ...user } : null
-			}));
-		}
-	};
+    updateUser(user: Partial<User>) {
+      update((s) => ({
+        ...s,
+        user: s.user ? { ...s.user, ...user } : null,
+      }));
+    },
+  };
 }
 
 export const authStore = createAuthStore();

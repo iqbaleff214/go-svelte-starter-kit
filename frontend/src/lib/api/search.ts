@@ -1,21 +1,21 @@
-import { api } from './client';
+import { api } from "./client";
 
 export interface SearchResult {
-	type: 'user' | 'role';
-	id: string;
-	title: string;
-	subtitle: string;
-	avatar_url?: string | null;
-	href: string;
+  type: "user" | "role";
+  id: string;
+  title: string;
+  subtitle: string;
+  avatar_url?: string | null;
+  href: string;
 }
 
 export interface SearchResponse {
-	users: SearchResult[];
-	roles: SearchResult[];
+  users: SearchResult[];
+  roles: SearchResult[];
 }
 
 export const searchApi = {
-	search(q: string): Promise<SearchResponse> {
-		return api.get(`/admin/search?q=${encodeURIComponent(q)}`);
-	}
+  search(q: string): Promise<SearchResponse> {
+    return api.get(`/admin/search?q=${encodeURIComponent(q)}`);
+  },
 };
