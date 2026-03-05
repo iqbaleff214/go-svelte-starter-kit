@@ -98,11 +98,18 @@
 	</div>
 
 	{#if loading}
-		<div class="flex justify-center py-16">
-			<svg class="h-6 w-6 animate-spin text-[var(--color-primary)]" viewBox="0 0 24 24" fill="none">
-				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-			</svg>
+		<div class="flex flex-col gap-2">
+			{#each Array.from({ length: 5 }) as _, i (i)}
+				<div class="rounded-[var(--radius)] border border-[var(--color-border)] border-l-4 border-l-[var(--color-muted)] bg-[var(--color-card)] px-4 py-3">
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0 flex-1 space-y-2">
+							<div class="animate-pulse h-3.5 rounded bg-[var(--color-muted)]" style="width: {i % 2 === 0 ? '55%' : '40%'}"></div>
+							<div class="animate-pulse h-3 rounded bg-[var(--color-muted)]" style="width: {i % 3 === 0 ? '75%' : '60%'}"></div>
+						</div>
+						<div class="animate-pulse h-3 w-16 rounded bg-[var(--color-muted)] shrink-0"></div>
+					</div>
+				</div>
+			{/each}
 		</div>
 	{:else if $notificationsList.length === 0}
 		<div class="text-center py-16 text-[var(--color-muted-fg)]">

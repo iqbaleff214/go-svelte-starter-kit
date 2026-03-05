@@ -230,7 +230,27 @@
 	<!-- Key list -->
 	<div class="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-card)] divide-y divide-[var(--color-border)]">
 		{#if loading}
-			<div class="p-8 text-center text-sm text-[var(--color-muted-fg)]">Loading…</div>
+			<div class="divide-y divide-[var(--color-border)]">
+				{#each Array.from({ length: 3 }) as _, i (i)}
+					<div class="p-4 space-y-2">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1 space-y-2">
+								<div class="flex items-center gap-2 flex-wrap">
+									<div class="animate-pulse h-4 w-28 rounded bg-[var(--color-muted)]"></div>
+									<div class="animate-pulse h-4 w-20 rounded bg-[var(--color-muted)]"></div>
+									<div class="animate-pulse h-4 w-12 rounded-full bg-[var(--color-muted)]"></div>
+								</div>
+								<div class="flex gap-1">
+									<div class="animate-pulse h-4 w-24 rounded bg-[var(--color-muted)]"></div>
+									<div class="animate-pulse h-4 w-20 rounded bg-[var(--color-muted)]" style="display: {i % 2 === 0 ? 'block' : 'none'}"></div>
+								</div>
+								<div class="animate-pulse h-3 rounded bg-[var(--color-muted)]" style="width: {i % 2 === 0 ? '180px' : '140px'}"></div>
+							</div>
+							<div class="animate-pulse h-4 w-4 rounded bg-[var(--color-muted)] shrink-0"></div>
+						</div>
+					</div>
+				{/each}
+			</div>
 		{:else if keys.length === 0}
 			<div class="p-8 text-center text-sm text-[var(--color-muted-fg)]">No API keys yet. Create one above.</div>
 		{:else}

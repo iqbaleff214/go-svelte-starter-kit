@@ -229,7 +229,14 @@
 
 		<div class="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
 			{#if loading}
-				<div class="text-center py-8 text-xs text-[var(--color-muted-fg)]">Loading…</div>
+				{#each Array.from({ length: 5 }) as _, i (i)}
+					<div class="rounded-[var(--radius)] px-3 py-2 flex items-start justify-between gap-1">
+						<div class="min-w-0 flex-1 space-y-1.5">
+							<div class="animate-pulse h-3 rounded bg-[var(--color-muted)]" style="width: {i % 2 === 0 ? '80%' : '60%'}"></div>
+							<div class="animate-pulse h-2.5 w-10 rounded bg-[var(--color-muted)]"></div>
+						</div>
+					</div>
+				{/each}
 			{:else if conversations.length === 0}
 				<div class="text-center py-8 text-xs text-[var(--color-muted-fg)]">No conversations yet</div>
 			{:else}
@@ -266,11 +273,16 @@
 		<!-- Messages -->
 		<div bind:this={messagesEl} class="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
 			{#if loadingConv}
-				<div class="flex justify-center py-8">
-					<svg class="h-5 w-5 animate-spin text-[var(--color-primary)]" viewBox="0 0 24 24" fill="none">
-						<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-						<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-					</svg>
+				<div class="flex flex-col gap-4">
+					<div class="flex justify-end">
+						<div class="animate-pulse h-10 w-48 rounded-[var(--radius-lg)] bg-[var(--color-muted)]"></div>
+					</div>
+					<div class="flex justify-start">
+						<div class="animate-pulse h-16 w-64 rounded-[var(--radius-lg)] bg-[var(--color-muted)]"></div>
+					</div>
+					<div class="flex justify-end">
+						<div class="animate-pulse h-8 w-36 rounded-[var(--radius-lg)] bg-[var(--color-muted)]"></div>
+					</div>
 				</div>
 			{:else if messages.length === 0 && !streaming}
 				<div class="flex-1 flex flex-col items-center justify-center text-center">

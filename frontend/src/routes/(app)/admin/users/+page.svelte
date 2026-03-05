@@ -155,12 +155,40 @@
 <!-- Table -->
 <div class="rounded-[var(--radius-lg)] border border-[var(--color-border)] overflow-hidden">
 	{#if loading}
-		<div class="flex justify-center py-16">
-			<svg class="h-6 w-6 animate-spin text-[var(--color-primary)]" viewBox="0 0 24 24" fill="none">
-				<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-				<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-			</svg>
-		</div>
+		<table class="w-full text-sm">
+			<thead>
+				<tr class="border-b border-[var(--color-border)] bg-[var(--color-muted)]/40">
+					<th class="text-left px-4 py-3 font-medium text-[var(--color-muted-fg)]">User</th>
+					<th class="text-left px-4 py-3 font-medium text-[var(--color-muted-fg)]">Roles</th>
+					<th class="text-left px-4 py-3 font-medium text-[var(--color-muted-fg)]">Joined</th>
+					<th class="px-4 py-3"></th>
+				</tr>
+			</thead>
+			<tbody class="divide-y divide-[var(--color-border)]">
+				{#each Array.from({ length: 5 }) as _, i (i)}
+					<tr class="bg-[var(--color-card)]">
+						<td class="px-4 py-3">
+							<div class="flex items-center gap-3">
+								<div class="animate-pulse h-8 w-8 rounded-full bg-[var(--color-muted)] shrink-0"></div>
+								<div class="space-y-1.5">
+									<div class="animate-pulse h-3 rounded bg-[var(--color-muted)]" style="width: {i % 2 === 0 ? '120px' : '90px'}"></div>
+									<div class="animate-pulse h-2.5 rounded bg-[var(--color-muted)]" style="width: {i % 3 === 0 ? '150px' : '120px'}"></div>
+								</div>
+							</div>
+						</td>
+						<td class="px-4 py-3">
+							<div class="animate-pulse h-5 w-16 rounded-full bg-[var(--color-muted)]"></div>
+						</td>
+						<td class="px-4 py-3">
+							<div class="animate-pulse h-3 w-20 rounded bg-[var(--color-muted)]"></div>
+						</td>
+						<td class="px-4 py-3 text-right">
+							<div class="animate-pulse h-4 w-4 rounded bg-[var(--color-muted)] ml-auto"></div>
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
 	{:else if users.length === 0}
 		<div class="text-center py-16 text-[var(--color-muted-fg)] text-sm">No users found.</div>
 	{:else}
