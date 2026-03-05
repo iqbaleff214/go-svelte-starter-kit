@@ -40,7 +40,6 @@ function clearTimer() {
 }
 
 function open(token: string) {
-	console.log("APA")
 	if (socket) {
 		socket.onclose = null; // suppress reconnect from the old socket
 		socket.close();
