@@ -123,6 +123,24 @@ export interface AdminUsersResponse {
   limit: number;
 }
 
+export interface AuditLog {
+  id: string;
+  actor_id: string;
+  actor_email: string;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AuditLogsResponse {
+  logs: AuditLog[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface EmailLog {
   id: string;
   user_id: string | null;

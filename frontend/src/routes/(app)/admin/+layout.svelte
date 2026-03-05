@@ -10,6 +10,7 @@
 		{ href: '/admin', label: 'Overview' },
 		{ href: '/admin/users', label: 'Users' },
 		{ href: '/admin/roles', label: 'Roles' },
+		{ href: '/admin/audit-logs', label: 'Audit Logs' },
 		{ href: '/admin/emails', label: 'Email Logs' }
 	];
 

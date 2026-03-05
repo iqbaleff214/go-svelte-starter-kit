@@ -1,7 +1,9 @@
 package rbac
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -67,6 +69,7 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not assign role")
 		return
 	}
+	h.logAction(assignedBy, "role.assign", "user", &userID, map[string]any{"role_id": roleID.String()})
 	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "Role assigned"}})
 }
 
@@ -87,6 +90,7 @@ func (h *Handler) RevokeRole(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not revoke role")
 		return
 	}
+	h.logAction(mustUserID(r), "role.revoke", "user", &userID, map[string]any{"role_id": roleID.String()})
 	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "Role revoked"}})
 }
 
@@ -97,16 +101,17 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "invalid_id", "Invalid user ID")
 		return
 	}
+	actorID := mustUserID(r)
 	// Prevent self-deletion
-	if userID == mustUserID(r) {
+	if userID == actorID {
 		respondError(w, http.StatusBadRequest, "self_delete", "Cannot delete your own account via admin panel")
 		return
 	}
-
 	if err := h.svc.DeleteUser(r.Context(), userID); err != nil {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not delete user")
 		return
 	}
+	h.logAction(actorID, "user.delete", "user", &userID, map[string]any{})
 	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "User deleted"}})
 }
 
@@ -144,6 +149,7 @@ func (h *Handler) CreateRole(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not create role")
 		return
 	}
+	h.logAction(mustUserID(r), "role.create", "role", &role.ID, map[string]any{"name": role.Name})
 	respondJSON(w, http.StatusCreated, envelope{"data": role})
 }
 
@@ -191,6 +197,7 @@ func (h *Handler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not update role")
 		return
 	}
+	h.logAction(mustUserID(r), "role.update", "role", &id, map[string]any{"name": role.Name})
 	respondJSON(w, http.StatusOK, envelope{"data": role})
 }
 
@@ -222,6 +229,7 @@ func (h *Handler) DeleteRole(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not delete role")
 		return
 	}
+	h.logAction(mustUserID(r), "role.delete", "role", &id, map[string]any{"name": role.Name})
 	respondJSON(w, http.StatusOK, envelope{"data": envelope{"message": "Role deleted"}})
 }
 
@@ -264,6 +272,7 @@ func (h *Handler) SetPermissions(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "internal_error", "Could not fetch updated role")
 		return
 	}
+	h.logAction(mustUserID(r), "role.set_permissions", "role", &id, map[string]any{"count": len(permIDs)})
 	respondJSON(w, http.StatusOK, envelope{"data": role})
 }
 
@@ -297,6 +306,39 @@ func (h *Handler) ListPermissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, envelope{"data": perms})
+}
+
+// ---- Audit logs ----
+
+// GET /api/admin/audit-logs
+func (h *Handler) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	page := queryInt(r, "page", 1)
+	limit := queryInt(r, "limit", 20)
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	logs, total, err := h.svc.repo.ListAuditLogs(r.Context(), limit, offset)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Could not fetch audit logs")
+		return
+	}
+	respondJSON(w, http.StatusOK, envelope{"data": envelope{
+		"logs":  logs,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	}})
+}
+
+// logAction writes an audit log entry in the background (fire-and-forget).
+func (h *Handler) logAction(actorID uuid.UUID, action, targetType string, targetID *uuid.UUID, metadata map[string]any) {
+	go func() {
+		if err := h.svc.repo.LogAction(context.Background(), actorID, action, targetType, targetID, metadata); err != nil {
+			slog.Error("audit log failed", "action", action, "err", err)
+		}
+	}()
 }
 
 // ---- Email logs ----

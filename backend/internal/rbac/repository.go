@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
@@ -366,6 +367,52 @@ func (r *Repository) SearchUsers(ctx context.Context, q string, limit int) ([]*S
 		})
 	}
 	return results, nil
+}
+
+// LogAction inserts a row into admin_audit_logs. Intended for fire-and-forget use.
+func (r *Repository) LogAction(ctx context.Context, actorID uuid.UUID, action, targetType string, targetID *uuid.UUID, metadata map[string]any) error {
+	_, err := r.db.Pool.Exec(ctx,
+		`INSERT INTO admin_audit_logs (actor_id, action, target_type, target_id, metadata)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		actorID, action, targetType, targetID, metadata,
+	)
+	return err
+}
+
+// ListAuditLogs returns paginated admin audit log entries with actor email joined.
+func (r *Repository) ListAuditLogs(ctx context.Context, limit, offset int) ([]*AuditLog, int, error) {
+	var total int
+	if err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin_audit_logs`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count audit logs: %w", err)
+	}
+
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT l.id, l.actor_id, u.email, l.action, l.target_type, l.target_id, l.metadata, l.created_at
+		FROM admin_audit_logs l
+		LEFT JOIN users u ON u.id = l.actor_id
+		ORDER BY l.created_at DESC
+		LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []*AuditLog
+	for rows.Next() {
+		l := &AuditLog{}
+		var meta []byte
+		if err := rows.Scan(&l.ID, &l.ActorID, &l.ActorEmail, &l.Action, &l.TargetType, &l.TargetID, &meta, &l.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		if err := json.Unmarshal(meta, &l.Metadata); err != nil {
+			l.Metadata = map[string]any{}
+		}
+		logs = append(logs, l)
+	}
+	if logs == nil {
+		logs = []*AuditLog{}
+	}
+	return logs, total, rows.Err()
 }
 
 // SearchRoles returns up to limit roles whose name matches the query (case-insensitive).

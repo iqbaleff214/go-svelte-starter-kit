@@ -67,3 +67,14 @@ type SearchResponse struct {
 	Users []*SearchResult `json:"users"`
 	Roles []*SearchResult `json:"roles"`
 }
+
+type AuditLog struct {
+	ID         uuid.UUID      `json:"id"`
+	ActorID    uuid.UUID      `json:"actor_id"`
+	ActorEmail string         `json:"actor_email"`
+	Action     string         `json:"action"`
+	TargetType string         `json:"target_type"`
+	TargetID   *uuid.UUID     `json:"target_id"`
+	Metadata   map[string]any `json:"metadata"`
+	CreatedAt  time.Time      `json:"created_at"`
+}

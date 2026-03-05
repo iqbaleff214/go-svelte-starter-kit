@@ -250,6 +250,8 @@ func (s *Server) routes() http.Handler {
 				r.Put("/roles/{id}/permissions", rbacHandler.SetPermissions)
 				// Permissions
 				r.Get("/permissions", rbacHandler.ListPermissions)
+				// Audit logs
+				r.Get("/audit-logs", rbacHandler.ListAuditLogs)
 				// Email logs
 				r.Get("/emails", rbacHandler.ListEmailLogs)
 				// Search

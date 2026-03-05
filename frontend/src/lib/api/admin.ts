@@ -1,6 +1,7 @@
 import { api } from "./client";
 import type {
   AdminUsersResponse,
+  AuditLogsResponse,
   Role,
   Permission,
   EmailLogsResponse,
@@ -62,6 +63,11 @@ export const adminApi = {
   // ---- Permissions ----
   listPermissions(): Promise<Permission[]> {
     return api.get("/admin/permissions");
+  },
+
+  // ---- Audit logs ----
+  listAuditLogs(page = 1, limit = 20): Promise<AuditLogsResponse> {
+    return api.get(`/admin/audit-logs?page=${page}&limit=${limit}`);
   },
 
   // ---- Email logs ----
