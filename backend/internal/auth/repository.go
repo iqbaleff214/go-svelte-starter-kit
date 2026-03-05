@@ -507,6 +507,33 @@ func scanSession(row pgx.Row) (*Session, error) {
 	return s, nil
 }
 
+// ---- Cleanup helpers (called by the background worker) ----
+
+func (r *Repository) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	tag, err := r.db.Pool.Exec(ctx, `DELETE FROM user_sessions WHERE expires_at < NOW()`)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *Repository) DeleteExpiredPasswordResets(ctx context.Context) (int64, error) {
+	tag, err := r.db.Pool.Exec(ctx, `DELETE FROM password_resets WHERE expires_at < NOW()`)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired password resets: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *Repository) DeleteExpiredEmailVerifications(ctx context.Context) (int64, error) {
+	tag, err := r.db.Pool.Exec(ctx,
+		`DELETE FROM email_verifications WHERE expires_at < NOW() AND used_at IS NULL`)
+	if err != nil {
+		return 0, fmt.Errorf("delete expired email verifications: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false

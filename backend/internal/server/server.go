@@ -140,9 +140,15 @@ func (s *Server) routes() http.Handler {
 	hub := ws.NewHub()
 	go hub.Run()
 
+	// ---- Webhooks ----
+	webhookRepo := webhook.NewRepository(s.db)
+	webhookSvc := webhook.NewService(webhookRepo)
+	webhookHandler := webhook.NewHandler(webhookRepo, v)
+
 	// ---- Notifications ----
 	notifRepo := notification.NewRepository(s.db)
 	notifSvc := notification.NewService(notifRepo, hub)
+	notifSvc.SetWebhookDispatcher(webhookSvc)
 	notifHandler := notification.NewHandler(notifSvc, v)
 
 	// ---- RBAC ----
@@ -155,23 +161,11 @@ func (s *Server) routes() http.Handler {
 	aiSvc := ai.NewService(aiRepo, s.cfg.AI, notifRepo, rbacRepo)
 	aiHandler := ai.NewHandler(aiSvc, v)
 
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			_ = aiSvc.PurgeOldConversations(context.Background())
-		}
-	}()
-
 	// ---- API Keys ----
 	apikeyRepo := apikey.NewRepository(s.db)
 	apikeySvc := apikey.NewService(apikeyRepo, s.redis.Client, s.cfg.Rate.APIKeyPerMin)
 	apikeyHandler := apikey.NewHandler(apikeySvc, v)
 	apikeyAdapt := &apikeyAdapter{svc: apikeySvc}
-
-	// ---- Webhooks ----
-	webhookRepo := webhook.NewRepository(s.db)
-	webhookHandler := webhook.NewHandler(webhookRepo, v)
 
 	// ---- Static file serving (avatars) ----
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))

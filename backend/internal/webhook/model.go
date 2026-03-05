@@ -6,6 +6,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// Supported event names.
+const (
+	EventNotificationCreated = "notification.created"
+)
+
+// Payload is the envelope POSTed to webhook URLs.
+type Payload struct {
+	ID        string    `json:"id"`
+	Event     string    `json:"event"`
+	CreatedAt time.Time `json:"created_at"`
+	Data      any       `json:"data"`
+}
+
 type Webhook struct {
 	ID        uuid.UUID `json:"id"`
 	URL       string    `json:"url"`

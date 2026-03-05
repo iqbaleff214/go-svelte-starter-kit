@@ -8,11 +8,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/404nfid/go-svelte-starter-kit/internal/ai"
+	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
+	"github.com/404nfid/go-svelte-starter-kit/internal/cleanup"
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/logger"
 	rdb "github.com/404nfid/go-svelte-starter-kit/pkg/redis"
+	"github.com/hibiken/asynq"
 )
 
 func main() {
@@ -46,17 +50,66 @@ func main() {
 	}
 	defer redis.Close()
 
+	// ---- Email worker (asynq server for "email" queue) ----
 	emailRepo := email.NewRepository(db)
-
 	emailEngine, err := email.NewEngine("templates/email")
 	if err != nil {
 		log.Error("load email templates", "error", err)
 		os.Exit(1)
 	}
-
 	emailSender := email.NewSender(cfg.Email)
+	emailWorker := email.NewWorker(cfg.Redis.URL, emailEngine, emailSender, emailRepo, cfg.App.URL)
 
-	worker := email.NewWorker(cfg.Redis.URL, emailEngine, emailSender, emailRepo, cfg.App.URL)
+	// ---- Cleanup worker (asynq server for "cleanup" queue) ----
+	authRepo := auth.NewRepository(db)
+	aiRepo := ai.NewRepository(db)
+	cleanupWorker := cleanup.New(authRepo, aiRepo, cfg.AI.ConversationTTL)
+
+	redisOpt, _ := asynq.ParseRedisURI(cfg.Redis.URL)
+	cleanupSrv := asynq.NewServer(redisOpt, asynq.Config{
+		Concurrency: 2,
+		Queues:      map[string]int{cleanup.Queue: 5},
+	})
+	cleanupMux := asynq.NewServeMux()
+	cleanupWorker.Register(cleanupMux)
+
+	// ---- Scheduler (enqueues cleanup tasks on a cron schedule) ----
+	scheduler := asynq.NewScheduler(redisOpt, nil)
+
+	// Every 6 hours: purge expired auth tokens and sessions
+	for _, task := range []string{
+		cleanup.TaskSessions,
+		cleanup.TaskPasswordResets,
+		cleanup.TaskEmailVerifications,
+	} {
+		if _, err := scheduler.Register(
+			"@every 6h",
+			asynq.NewTask(task, nil, asynq.Queue(cleanup.Queue), asynq.MaxRetry(2)),
+		); err != nil {
+			log.Error("register cleanup task", "task", task, "error", err)
+			os.Exit(1)
+		}
+	}
+
+	// Every 24 hours: purge old AI conversations
+	if _, err := scheduler.Register(
+		"@every 24h",
+		asynq.NewTask(cleanup.TaskAIConversations, nil, asynq.Queue(cleanup.Queue), asynq.MaxRetry(2)),
+	); err != nil {
+		log.Error("register cleanup task", "task", cleanup.TaskAIConversations, "error", err)
+		os.Exit(1)
+	}
+
+	if err := scheduler.Start(); err != nil {
+		log.Error("start cleanup scheduler", "error", err)
+		os.Exit(1)
+	}
+
+	go func() {
+		if err := cleanupSrv.Run(cleanupMux); err != nil {
+			log.Error("cleanup worker error", "error", err)
+		}
+	}()
 
 	log.Info("worker started", "env", cfg.App.Env)
 
@@ -66,11 +119,14 @@ func main() {
 	go func() {
 		<-quit
 		log.Info("shutting down worker...")
-		worker.Stop()
+		scheduler.Shutdown()
+		cleanupSrv.Shutdown()
+		emailWorker.Stop()
 	}()
 
-	if err := worker.Start(); err != nil {
-		log.Error("worker error", "error", err)
+	// emailWorker.Start() blocks until Stop() is called
+	if err := emailWorker.Start(); err != nil {
+		log.Error("email worker error", "error", err)
 		os.Exit(1)
 	}
 

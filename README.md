@@ -30,7 +30,7 @@ A production-ready full-stack starter kit pairing a **Go** API backend with a **
 | Database | PostgreSQL (pgx/v5 — no ORM) |
 | Cache / PubSub | Redis |
 | Auth | JWT (golang-jwt), bcrypt, TOTP (pquerna/otp) |
-| AI | Anthropic Claude API (streaming) |
+| AI | Anthropic Claude + Google Gemini (streaming, switchable) |
 | Email | SMTP / SendGrid |
 | Migrations | [golang-migrate](https://github.com/golang-migrate/migrate) |
 | Styling | TailwindCSS v4 |
@@ -113,7 +113,9 @@ Copy `backend/.env.example` → `backend/.env` (done automatically by `make setu
 | `EMAIL_PROVIDER` | No | `smtp` or `sendgrid` |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | No | SMTP credentials |
 | `SENDGRID_API_KEY` | No | SendGrid API key (if using sendgrid provider) |
-| `ANTHROPIC_API_KEY` | No | Anthropic API key for AI chat |
+| `AI_PROVIDER` | No | AI backend: `anthropic` (default) or `gemini` |
+| `ANTHROPIC_API_KEY` | No | Anthropic API key for Claude models |
+| `GEMINI_API_KEY` | No | Google Gemini API key |
 | `RATE_LIMIT_AUTH` | No | Auth endpoint rate limit req/min (default: `5`) |
 | `RATE_LIMIT_API` | No | General API rate limit req/min (default: `100`) |
 

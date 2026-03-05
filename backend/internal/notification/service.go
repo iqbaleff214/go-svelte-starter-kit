@@ -10,13 +10,24 @@ import (
 	"github.com/google/uuid"
 )
 
+// WebhookDispatcher is satisfied by *webhook.Service.
+// Defined here to avoid an import cycle.
+type WebhookDispatcher interface {
+	Dispatch(ctx context.Context, userID uuid.UUID, event string, data any)
+}
+
 type Service struct {
-	repo *Repository
-	hub  *ws.Hub
+	repo     *Repository
+	hub      *ws.Hub
+	webhooks WebhookDispatcher // optional; set after construction
 }
 
 func NewService(repo *Repository, hub *ws.Hub) *Service {
 	return &Service{repo: repo, hub: hub}
+}
+
+func (s *Service) SetWebhookDispatcher(d WebhookDispatcher) {
+	s.webhooks = d
 }
 
 type wsMessage struct {
@@ -37,6 +48,11 @@ func (s *Service) Push(ctx context.Context, userID uuid.UUID, nType, title, body
 	} else {
 		slog.Warn("ws: marshal notification payload", "err", err)
 	}
+
+	if s.webhooks != nil {
+		s.webhooks.Dispatch(ctx, userID, "notification.created", n)
+	}
+
 	return nil
 }
 

@@ -44,7 +44,9 @@
 	// Condensed items for mobile bottom tab bar
 	const bottomTabItems = [
 		{ href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
-		{ href: '/notifications', icon: Bell, label: 'Alerts' }
+		{ href: '/notifications', icon: Bell, label: 'Alerts' },
+		{ href: '/ai', icon: Bot, label: 'AI' },
+		{ href: '/profile', icon: User, label: 'Profile' }
 	];
 
 	onMount(() => {

@@ -61,6 +61,32 @@ func (r *Repository) ListByUser(ctx context.Context, userID uuid.UUID) ([]*Webho
 	return whs, rows.Err()
 }
 
+// FindActiveByUserAndEvent returns all active webhooks for a user that subscribe to the given event.
+func (r *Repository) FindActiveByUserAndEvent(ctx context.Context, userID uuid.UUID, event string) ([]*Webhook, error) {
+	rows, err := r.db.Pool.Query(ctx,
+		`SELECT id, url, events, active, created_at, updated_at
+		 FROM webhooks WHERE user_id = $1 AND active = TRUE AND $2 = ANY(events)`,
+		userID, event,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("find webhooks by event: %w", err)
+	}
+	defer rows.Close()
+
+	var whs []*Webhook
+	for rows.Next() {
+		wh := &Webhook{}
+		if err := rows.Scan(&wh.ID, &wh.URL, &wh.Events, &wh.Active, &wh.CreatedAt, &wh.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if wh.Events == nil {
+			wh.Events = []string{}
+		}
+		whs = append(whs, wh)
+	}
+	return whs, rows.Err()
+}
+
 func (r *Repository) Delete(ctx context.Context, id, userID uuid.UUID) error {
 	tag, err := r.db.Pool.Exec(ctx,
 		`DELETE FROM webhooks WHERE id = $1 AND user_id = $2`,
