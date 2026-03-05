@@ -2,6 +2,12 @@ import type { ApiError, ApiResponse } from "$types";
 
 const BASE_URL = "/api";
 
+function getCsrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 class ApiClient {
   private accessToken: string | null = null;
 
@@ -19,6 +25,10 @@ class ApiClient {
     };
     if (this.accessToken) {
       headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+    const csrf = getCsrfToken();
+    if (csrf) {
+      headers["X-CSRF-Token"] = csrf;
     }
     return headers;
   }
@@ -89,6 +99,10 @@ class ApiClient {
     const headers: Record<string, string> = {};
     if (this.accessToken) {
       headers["Authorization"] = `Bearer ${this.accessToken}`;
+    }
+    const csrf = getCsrfToken();
+    if (csrf) {
+      headers["X-CSRF-Token"] = csrf;
     }
     const res = await fetch(`${BASE_URL}${path}`, {
       method: "POST",

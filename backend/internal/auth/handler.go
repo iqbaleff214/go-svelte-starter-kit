@@ -14,7 +14,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const refreshTokenCookie = "refresh_token"
+const (
+	refreshTokenCookie = "refresh_token"
+	csrfCookie         = "csrf_token"
+	csrfHeader         = "X-CSRF-Token"
+)
 
 type Handler struct {
 	svc          *Service
@@ -91,6 +95,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/refresh
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	if !h.validateCSRF(w, r) {
+		return
+	}
 	refreshToken := h.getRefreshToken(r)
 	if refreshToken == "" {
 		respondError(w, http.StatusUnauthorized, "missing_token", "Refresh token is required")
@@ -110,6 +117,9 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if !h.validateCSRF(w, r) {
+		return
+	}
 	refreshToken := h.getRefreshToken(r)
 	_ = h.svc.Logout(r.Context(), refreshToken)
 	h.clearRefreshCookie(w)
@@ -126,6 +136,22 @@ func (h *Handler) setRefreshCookie(w http.ResponseWriter, token string) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(h.refreshTTL.Seconds()),
 	})
+	// Double-submit CSRF cookie: non-HttpOnly so JS can read it and echo it
+	// back in the X-CSRF-Token header. An attacker on a different origin cannot
+	// read this value, even if SameSite=Strict is later changed to None.
+	csrfToken, err := randomHex(16)
+	if err != nil {
+		return // fail open on cookie set; validateCSRF will reject missing cookie
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookie,
+		Value:    csrfToken,
+		Path:     "/",
+		HttpOnly: false, // must be readable by JS
+		Secure:   h.secureCookie,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(h.refreshTTL.Seconds()),
+	})
 }
 
 func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
@@ -136,6 +162,24 @@ func (h *Handler) clearRefreshCookie(w http.ResponseWriter) {
 		Secure:   h.secureCookie,
 		MaxAge:   -1,
 	})
+	http.SetCookie(w, &http.Cookie{
+		Name:   csrfCookie,
+		Path:   "/",
+		MaxAge: -1,
+	})
+}
+
+// validateCSRF checks the double-submit cookie pattern: the X-CSRF-Token request
+// header must match the csrf_token cookie value. Only the legitimate origin can
+// read the non-HttpOnly cookie and echo it as a header.
+func (h *Handler) validateCSRF(w http.ResponseWriter, r *http.Request) bool {
+	cookie, err := r.Cookie(csrfCookie)
+	headerVal := r.Header.Get(csrfHeader)
+	if err != nil || headerVal == "" || headerVal != cookie.Value {
+		respondError(w, http.StatusForbidden, "csrf_invalid", "CSRF token mismatch")
+		return false
+	}
+	return true
 }
 
 func (h *Handler) getRefreshToken(r *http.Request) string {
