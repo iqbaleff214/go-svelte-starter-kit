@@ -16,8 +16,9 @@ import (
 type ToolInput map[string]any
 
 type Tool struct {
-	Param   anthropic.ToolUnionParam
-	Execute func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error)
+	Param       anthropic.ToolUnionParam
+	Description string // used for Gemini function declarations
+	Execute     func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error)
 }
 
 func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) []Tool {
@@ -29,6 +30,7 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 				},
 				"get_current_user",
 			),
+			Description: "Get the currently authenticated user's profile, including user ID, email, and roles.",
 			Execute: func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error) {
 				result := map[string]any{
 					"user_id": claims.UserID,
@@ -51,6 +53,7 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 				},
 				"list_notifications",
 			),
+			Description: "List recent notifications for the current user.",
 			Execute: func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error) {
 				limit := 10
 				if v, ok := input["limit"]; ok {
@@ -96,6 +99,7 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 				},
 				"search_users",
 			),
+			Description: "Search for users by email or display name. Only available to admins and superadmins.",
 			Execute: func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error) {
 				if !slices.Contains(claims.Roles, "admin") && !slices.Contains(claims.Roles, "superadmin") {
 					return `"Permission denied: only admins can search users"`, nil

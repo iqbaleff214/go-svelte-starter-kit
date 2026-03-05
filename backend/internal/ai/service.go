@@ -18,6 +18,56 @@ import (
 	"github.com/google/uuid"
 )
 
+// ---- Gemini API types ----
+
+type geminiPart struct {
+	Text             string                  `json:"text,omitempty"`
+	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
+	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+}
+
+type geminiFunctionCall struct {
+	Name string         `json:"name"`
+	Args map[string]any `json:"args"`
+}
+
+type geminiFunctionResponse struct {
+	Name     string         `json:"name"`
+	Response map[string]any `json:"response"`
+}
+
+type geminiContent struct {
+	Role  string       `json:"role,omitempty"`
+	Parts []geminiPart `json:"parts"`
+}
+
+type geminiTool struct {
+	FunctionDeclarations []map[string]any `json:"functionDeclarations"`
+}
+
+type geminiGenConfig struct {
+	MaxOutputTokens int `json:"maxOutputTokens"`
+}
+
+type geminiRequest struct {
+	Contents          []geminiContent `json:"contents"`
+	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
+	GenerationConfig  geminiGenConfig `json:"generationConfig"`
+	Tools             []geminiTool    `json:"tools,omitempty"`
+}
+
+type geminiEvent struct {
+	Candidates []struct {
+		Content      geminiContent `json:"content"`
+		FinishReason string        `json:"finishReason"`
+	} `json:"candidates"`
+	UsageMetadata struct {
+		TotalTokenCount int `json:"totalTokenCount"`
+	} `json:"usageMetadata"`
+}
+
+// ---- Service ----
+
 type Service struct {
 	repo            *Repository
 	client          anthropic.Client
@@ -63,6 +113,36 @@ func (s *Service) findTool(name string) *Tool {
 	return nil
 }
 
+// geminiTools converts the service's tool list to the Gemini function-declaration format.
+func (s *Service) geminiTools() []geminiTool {
+	decls := make([]map[string]any, 0, len(s.tools))
+	for _, t := range s.tools {
+		if t.Param.OfTool == nil {
+			continue
+		}
+		tool := t.Param.OfTool
+		schema := map[string]any{
+			"type":       "object",
+			"properties": tool.InputSchema.Properties,
+		}
+		if len(tool.InputSchema.Required) > 0 {
+			schema["required"] = tool.InputSchema.Required
+		}
+		decl := map[string]any{
+			"name":       tool.Name,
+			"parameters": schema,
+		}
+		if t.Description != "" {
+			decl["description"] = t.Description
+		}
+		decls = append(decls, decl)
+	}
+	if len(decls) == 0 {
+		return nil
+	}
+	return []geminiTool{{FunctionDeclarations: decls}}
+}
+
 // Chat dispatches to the appropriate provider.
 func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
 	provider := req.Provider
@@ -70,7 +150,7 @@ func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Clai
 		provider = s.defaultProvider
 	}
 	if provider == "gemini" {
-		return s.chatWithGemini(ctx, userID, req, w)
+		return s.chatWithGemini(ctx, userID, claims, req, w)
 	}
 	return s.chatWithAnthropic(ctx, userID, claims, req, w)
 }
@@ -186,8 +266,10 @@ func (s *Service) chatWithAnthropic(ctx context.Context, userID uuid.UUID, claim
 	}
 }
 
-// chatWithGemini streams a response using the Google Gemini REST API.
-func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, req ChatRequest, w http.ResponseWriter) error {
+// chatWithGemini runs the agentic streaming loop using the Google Gemini REST API.
+// It mirrors chatWithAnthropic: tools are declared in the request, function calls
+// are detected in the response, executed, and fed back until the model stops.
+func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
 	if s.geminiKey == "" {
 		writeSSE(w, map[string]any{"type": "error", "message": "Gemini API key not configured"})
 		flush(w)
@@ -214,27 +296,8 @@ func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, req Chat
 	writeSSE(w, map[string]any{"type": "start", "conversation_id": conv.ID.String()})
 	flush(w)
 
-	// Build Gemini request body
-	type geminiPart struct {
-		Text string `json:"text"`
-	}
-	type geminiContent struct {
-		Role  string       `json:"role"`
-		Parts []geminiPart `json:"parts"`
-	}
-	type geminiSysInstruction struct {
-		Parts []geminiPart `json:"parts"`
-	}
-	type geminiGenConfig struct {
-		MaxOutputTokens int `json:"maxOutputTokens"`
-	}
-	type geminiRequest struct {
-		Contents          []geminiContent       `json:"contents"`
-		SystemInstruction *geminiSysInstruction `json:"systemInstruction,omitempty"`
-		GenerationConfig  geminiGenConfig       `json:"generationConfig"`
-	}
-
-	var contents []geminiContent
+	// Build conversation history as Gemini contents.
+	contents := make([]geminiContent, 0, len(conv.Messages)+1)
 	for _, m := range conv.Messages {
 		role := m.Role
 		if role == "assistant" {
@@ -244,98 +307,120 @@ func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, req Chat
 	}
 	contents = append(contents, geminiContent{Role: "user", Parts: []geminiPart{{Text: req.Message}}})
 
-	gemReq := geminiRequest{
-		Contents:         contents,
-		GenerationConfig: geminiGenConfig{MaxOutputTokens: 8192},
-	}
-	if s.sysPrompt != "" {
-		gemReq.SystemInstruction = &geminiSysInstruction{Parts: []geminiPart{{Text: s.sysPrompt}}}
-	}
+	storedMessages := append(conv.Messages, ChatMessage{Role: "user", Content: req.Message})
+	var totalTokens int
+	var assistantText strings.Builder
 
-	reqBody, _ := json.Marshal(gemReq)
-	url := fmt.Sprintf(
+	geminiURL := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
 		s.geminiModel, s.geminiKey,
 	)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
-	if err != nil {
-		return err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(httpReq)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil
+	for {
+		gemReq := geminiRequest{
+			Contents:         contents,
+			GenerationConfig: geminiGenConfig{MaxOutputTokens: 8192},
+			Tools:            s.geminiTools(),
 		}
-		writeSSE(w, map[string]any{"type": "error", "message": "Gemini request failed"})
-		flush(w)
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		writeSSE(w, map[string]any{"type": "error", "message": fmt.Sprintf("Gemini API error (status %d)", resp.StatusCode)})
-		flush(w)
-		return fmt.Errorf("gemini status %d", resp.StatusCode)
-	}
-
-	// Parse SSE stream from Gemini
-	var geminiEvent struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-			FinishReason string `json:"finishReason"`
-		} `json:"candidates"`
-		UsageMetadata struct {
-			TotalTokenCount int `json:"totalTokenCount"`
-		} `json:"usageMetadata"`
-	}
-
-	var assistantText strings.Builder
-	var totalTokens int
-
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
+		if s.sysPrompt != "" {
+			gemReq.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: s.sysPrompt}}}
 		}
-		data := line[6:]
-		if err := json.Unmarshal([]byte(data), &geminiEvent); err != nil {
-			continue
+
+		reqBody, _ := json.Marshal(gemReq)
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiURL, bytes.NewReader(reqBody))
+		if err != nil {
+			return err
 		}
-		if len(geminiEvent.Candidates) > 0 {
-			for _, part := range geminiEvent.Candidates[0].Content.Parts {
-				if part.Text != "" {
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		resp, err := http.DefaultClient.Do(httpReq)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			writeSSE(w, map[string]any{"type": "error", "message": "Gemini request failed"})
+			flush(w)
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			writeSSE(w, map[string]any{"type": "error", "message": fmt.Sprintf("Gemini API error (status %d)", resp.StatusCode)})
+			flush(w)
+			return fmt.Errorf("gemini status %d", resp.StatusCode)
+		}
+
+		// Stream the SSE response, collecting text deltas and function calls.
+		var fnCalls []geminiFunctionCall
+		assistantText.Reset()
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var event geminiEvent
+			if json.Unmarshal([]byte(line[6:]), &event) != nil {
+				continue
+			}
+			if len(event.Candidates) == 0 {
+				continue
+			}
+			for _, part := range event.Candidates[0].Content.Parts {
+				switch {
+				case part.FunctionCall != nil:
+					fnCalls = append(fnCalls, *part.FunctionCall)
+				case part.Text != "":
 					assistantText.WriteString(part.Text)
 					writeSSE(w, map[string]any{"type": "delta", "text": part.Text})
 					flush(w)
 				}
 			}
-			if geminiEvent.UsageMetadata.TotalTokenCount > 0 {
-				totalTokens = geminiEvent.UsageMetadata.TotalTokenCount
+			if event.UsageMetadata.TotalTokenCount > 0 {
+				totalTokens = event.UsageMetadata.TotalTokenCount
 			}
 		}
-	}
+		resp.Body.Close()
 
-	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		return err
-	}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			return err
+		}
 
-	storedMessages := append(conv.Messages, ChatMessage{Role: "user", Content: req.Message})
-	if text := assistantText.String(); text != "" {
-		storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
-	}
-	_ = s.repo.UpdateConversation(ctx, conv.ID, storedMessages, totalTokens)
-	writeSSE(w, map[string]any{"type": "done", "token_usage": totalTokens})
-	flush(w)
+		if len(fnCalls) > 0 {
+			// Append the model's function-call turn to the conversation context.
+			modelParts := make([]geminiPart, len(fnCalls))
+			for i := range fnCalls {
+				fc := fnCalls[i]
+				modelParts[i] = geminiPart{FunctionCall: &fc}
+			}
+			contents = append(contents, geminiContent{Role: "model", Parts: modelParts})
 
-	return nil
+			// Execute each tool and collect results.
+			userParts := make([]geminiPart, len(fnCalls))
+			for i, fc := range fnCalls {
+				rawArgs, _ := json.Marshal(fc.Args)
+				result := s.executeTool(ctx, claims, fc.Name, json.RawMessage(rawArgs))
+				userParts[i] = geminiPart{
+					FunctionResponse: &geminiFunctionResponse{
+						Name:     fc.Name,
+						Response: map[string]any{"result": result},
+					},
+				}
+			}
+			contents = append(contents, geminiContent{Role: "user", Parts: userParts})
+			continue // loop: send tool results back to Gemini
+		}
+
+		// No function calls — conversation is complete.
+		if text := assistantText.String(); text != "" {
+			storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
+		}
+		_ = s.repo.UpdateConversation(ctx, conv.ID, storedMessages, totalTokens)
+		writeSSE(w, map[string]any{"type": "done", "token_usage": totalTokens})
+		flush(w)
+		return nil
+	}
 }
 
 func (s *Service) executeTool(ctx context.Context, claims *token.Claims, name string, inputRaw json.RawMessage) string {
