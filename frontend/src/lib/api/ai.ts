@@ -3,7 +3,7 @@ import type { Conversation, ConversationSummary } from '$types';
 
 export const aiApi = {
 	// Returns raw Response — caller reads body.getReader() for SSE stream
-	streamChat(message: string, conversationId?: string | null, signal?: AbortSignal): Promise<Response> {
+	streamChat(message: string, conversationId?: string | null, signal?: AbortSignal, provider?: string): Promise<Response> {
 		const token = api.getAccessToken();
 		const headers: HeadersInit = { 'Content-Type': 'application/json' };
 		if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -15,7 +15,8 @@ export const aiApi = {
 			signal,
 			body: JSON.stringify({
 				message,
-				conversation_id: conversationId ?? null
+				conversation_id: conversationId ?? null,
+				provider: provider ?? ''
 			})
 		});
 	},

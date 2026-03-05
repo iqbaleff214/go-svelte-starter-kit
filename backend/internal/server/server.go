@@ -258,6 +258,8 @@ func (s *Server) routes() http.Handler {
 				r.Get("/permissions", rbacHandler.ListPermissions)
 				// Email logs
 				r.Get("/emails", rbacHandler.ListEmailLogs)
+				// Search
+				r.Get("/search", rbacHandler.Search)
 			})
 
 			// AI

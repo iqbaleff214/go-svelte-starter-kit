@@ -33,4 +33,5 @@ type ConversationSummary struct {
 type ChatRequest struct {
 	ConversationID *string `json:"conversation_id"`
 	Message        string  `json:"message" validate:"required,min=1,max=4000"`
+	Provider       string  `json:"provider"` // "anthropic" or "gemini"; empty = use server default
 }

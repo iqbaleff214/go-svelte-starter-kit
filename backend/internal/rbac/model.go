@@ -53,3 +53,17 @@ type UpdateRoleRequest struct {
 type SetPermissionsRequest struct {
 	PermissionIDs []string `json:"permission_ids"`
 }
+
+type SearchResult struct {
+	Type      string  `json:"type"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Subtitle  string  `json:"subtitle"`
+	AvatarURL *string `json:"avatar_url,omitempty"`
+	Href      string  `json:"href"`
+}
+
+type SearchResponse struct {
+	Users []*SearchResult `json:"users"`
+	Roles []*SearchResult `json:"roles"`
+}

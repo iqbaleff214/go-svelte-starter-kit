@@ -168,3 +168,22 @@ func (s *Service) SetRolePermissions(ctx context.Context, roleID uuid.UUID, perm
 func (s *Service) ListPermissions(ctx context.Context) ([]*Permission, error) {
 	return s.repo.ListPermissions(ctx)
 }
+
+// Search returns users and roles matching q (minimum 2 chars).
+func (s *Service) Search(ctx context.Context, q string) (*SearchResponse, error) {
+	users, err := s.repo.SearchUsers(ctx, q, 5)
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+	roles, err := s.repo.SearchRoles(ctx, q, 5)
+	if err != nil {
+		return nil, fmt.Errorf("search roles: %w", err)
+	}
+	if users == nil {
+		users = []*SearchResult{}
+	}
+	if roles == nil {
+		roles = []*SearchResult{}
+	}
+	return &SearchResponse{Users: users, Roles: roles}, nil
+}

@@ -10,15 +10,18 @@
 	import { onMount, onDestroy } from 'svelte';
 	import {
 		LayoutDashboard, User, Bell, Key, Bot, Shield, Lock, LogOut,
-		Sun, Moon, Monitor, ChevronUp
+		Sun, Moon, Monitor, ChevronUp, Search, PanelLeftClose, PanelLeftOpen
 	} from 'lucide-svelte';
 	import { theme } from '$stores/theme';
+	import { commandPalette } from '$stores/commandPalette';
+	import { aiChat } from '$stores/aiChat';
+	import CommandPalette from '$components/ui/CommandPalette.svelte';
+	import AiChatPanel from '$components/ui/AiChatPanel.svelte';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
 
 	const navItems = [
-		{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-		{ href: '/ai', icon: Bot, label: 'AI Assistant' }
+		{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }
 	];
 
 	const themeLabels: Record<string, string> = { light: 'Light', dark: 'Dark', system: 'System' };
@@ -26,6 +29,12 @@
 
 	let userMenuOpen = $state(false);
 	let mobileUserMenuOpen = $state(false);
+	let sidebarCollapsed = $state(
+		typeof localStorage !== 'undefined' ? localStorage.getItem('sidebar-collapsed') === 'true' : false
+	);
+	$effect(() => {
+		localStorage.setItem('sidebar-collapsed', String(sidebarCollapsed));
+	});
 
 	const adminItems = [
 		{ href: '/admin', icon: Shield, label: 'Admin' }
@@ -34,8 +43,7 @@
 	// Condensed items for mobile bottom tab bar
 	const bottomTabItems = [
 		{ href: '/dashboard', icon: LayoutDashboard, label: 'Home' },
-		{ href: '/notifications', icon: Bell, label: 'Alerts' },
-		{ href: '/ai', icon: Bot, label: 'AI' }
+		{ href: '/notifications', icon: Bell, label: 'Alerts' }
 	];
 
 	onMount(() => {
@@ -51,6 +59,15 @@
 				}
 			}
 		});
+
+		function handleKeydown(e: KeyboardEvent) {
+			if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+				e.preventDefault();
+				commandPalette.toggle();
+			}
+		}
+		window.addEventListener('keydown', handleKeydown);
+		return () => window.removeEventListener('keydown', handleKeydown);
 	});
 
 	onDestroy(() => wsStore.disconnect());
@@ -93,35 +110,46 @@
 {:else if $currentUser}
 	<div class="h-screen overflow-hidden bg-[var(--color-background)] flex">
 		<!-- Desktop sidebar (hidden on mobile) -->
-		<aside class="hidden lg:flex lg:flex-col w-64 border-r border-[var(--color-border)] bg-[var(--color-card)] shrink-0">
+		<aside class="hidden lg:flex lg:flex-col border-r border-[var(--color-border)] bg-[var(--color-card)] shrink-0 transition-[width] duration-200 overflow-hidden {sidebarCollapsed ? 'w-16' : 'w-64'}">
 			<!-- Logo -->
-			<div class="flex h-16 items-center px-5 border-b border-[var(--color-border)] shrink-0">
-				<a href="/" class="flex items-center gap-2 font-bold text-[var(--color-foreground)]">
-					<span class="text-[var(--color-primary)]">⚡</span>
-					StarterKit
-				</a>
+			<div class="flex h-16 shrink-0 items-center border-b border-[var(--color-border)] {sidebarCollapsed ? 'justify-center px-0' : 'px-4 justify-between'}">
+				{#if sidebarCollapsed}
+					<button
+						onclick={() => sidebarCollapsed = false}
+						title="Expand sidebar"
+						class="text-[var(--color-primary)] text-lg font-bold hover:opacity-70 transition-opacity"
+					>⚡</button>
+				{:else}
+					<a href="/" class="flex items-center gap-2 font-bold text-[var(--color-foreground)] min-w-0">
+						<span class="text-[var(--color-primary)] shrink-0">⚡</span>
+						<span class="truncate">StarterKit</span>
+					</a>
+					<button
+						onclick={() => sidebarCollapsed = true}
+						title="Collapse sidebar"
+						class="shrink-0 rounded p-1.5 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+					>
+						<PanelLeftClose class="h-4 w-4" />
+					</button>
+				{/if}
 			</div>
 
 			<!-- Nav -->
-			<nav class="flex-1 overflow-y-auto p-3 space-y-0.5">
+			<nav class="flex-1 overflow-y-auto p-2 space-y-0.5">
 				{#each navItems as item}
 					<a
 						href={item.href}
+						title={sidebarCollapsed ? item.label : undefined}
 						class="
-							flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5 text-sm font-medium
-							transition-colors
+							flex items-center rounded-[var(--radius-sm)] py-2.5 text-sm font-medium transition-colors
+							{sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'}
 							{isActive(item.href)
 								? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
 								: 'text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]'}
 						"
 					>
 						<svelte:component this={item.icon} class="h-4 w-4 shrink-0" />
-						{item.label}
-						{#if item.href === '/notifications' && $unreadCount > 0}
-							<span class="ml-auto text-xs font-bold bg-[var(--color-destructive)] text-white rounded-full px-1.5 py-0.5 min-w-[18px] text-center leading-tight">
-								{$unreadCount > 99 ? '99+' : $unreadCount}
-							</span>
-						{/if}
+						{#if !sidebarCollapsed}{item.label}{/if}
 					</a>
 				{/each}
 
@@ -130,22 +158,28 @@
 					{#each adminItems as item}
 						<a
 							href={item.href}
-							class="flex items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2.5 text-sm font-medium text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+							title={sidebarCollapsed ? item.label : undefined}
+							class="
+								flex items-center rounded-[var(--radius-sm)] py-2.5 text-sm font-medium
+								text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors
+								{sidebarCollapsed ? 'justify-center px-0' : 'gap-3 px-3'}
+							"
 						>
 							<svelte:component this={item.icon} class="h-4 w-4 shrink-0" />
-							{item.label}
+							{#if !sidebarCollapsed}{item.label}{/if}
 						</a>
 					{/each}
 				{/if}
 			</nav>
 
 			<!-- User section -->
-			<div class="border-t border-[var(--color-border)] p-3 shrink-0 relative">
+			<div class="border-t border-[var(--color-border)] p-2 shrink-0 relative">
 				{#if userMenuOpen}
 					<!-- Backdrop -->
 					<div class="fixed inset-0 z-10" onclick={() => userMenuOpen = false}></div>
-					<!-- Dropdown menu -->
-					<div class="absolute bottom-full left-3 right-3 mb-1 z-20 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-md)] py-1 overflow-hidden">
+					<!-- Dropdown: upward when expanded, rightward when collapsed -->
+					<div class="absolute z-20 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-card)] shadow-[var(--shadow-md)] py-1 overflow-hidden
+						{sidebarCollapsed ? 'bottom-2 left-full ml-2 w-52' : 'bottom-full left-2 right-2 mb-1'}">
 						<a
 							href="/profile"
 							onclick={() => userMenuOpen = false}
@@ -191,20 +225,24 @@
 				<!-- User trigger button -->
 				<button
 					onclick={() => userMenuOpen = !userMenuOpen}
-					class="w-full flex items-center gap-3 px-2 py-2 rounded-[var(--radius-sm)] hover:bg-[var(--color-muted)] transition-colors text-left"
+					title={sidebarCollapsed ? $currentUser.display_name : undefined}
+					class="w-full flex items-center rounded-[var(--radius-sm)] hover:bg-[var(--color-muted)] transition-colors
+						{sidebarCollapsed ? 'justify-center p-1' : 'gap-3 px-2 py-2 text-left'}"
 				>
-					<div class="h-8 w-8 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-xs font-bold text-white shrink-0">
+					<div class="h-8 w-8 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-xs font-bold text-white shrink-0 overflow-hidden">
 						{#if $currentUser.avatar_url}
-							<img src={$currentUser.avatar_url} alt="" class="h-8 w-8 rounded-full object-cover" />
+							<img src={$currentUser.avatar_url} alt="" class="h-8 w-8 object-cover" />
 						{:else}
 							{getInitials($currentUser.display_name)}
 						{/if}
 					</div>
-					<div class="min-w-0 flex-1">
-						<p class="text-sm font-medium text-[var(--color-foreground)] truncate">{$currentUser.display_name}</p>
-						<p class="text-xs text-[var(--color-muted-fg)] truncate">{$currentUser.email}</p>
-					</div>
-					<ChevronUp class="h-4 w-4 text-[var(--color-muted-fg)] shrink-0 transition-transform {userMenuOpen ? '' : 'rotate-180'}" />
+					{#if !sidebarCollapsed}
+						<div class="min-w-0 flex-1">
+							<p class="text-sm font-medium text-[var(--color-foreground)] truncate">{$currentUser.display_name}</p>
+							<p class="text-xs text-[var(--color-muted-fg)] truncate">{$currentUser.email}</p>
+						</div>
+						<ChevronUp class="h-4 w-4 text-[var(--color-muted-fg)] shrink-0 transition-transform {userMenuOpen ? '' : 'rotate-180'}" />
+					{/if}
 				</button>
 			</div>
 		</aside>
@@ -212,7 +250,26 @@
 		<!-- Main content -->
 		<div class="flex-1 flex flex-col min-w-0">
 			<!-- Topbar -->
-			<header class="h-14 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-card)] flex items-center justify-end px-4 sm:px-6 gap-1">
+			<header class="h-16 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-card)] flex items-center px-4 sm:px-6 gap-2">
+				{#if sidebarCollapsed}
+					<button
+						onclick={() => sidebarCollapsed = false}
+						title="Expand sidebar"
+						class="hidden lg:flex shrink-0 rounded p-1.5 text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
+					>
+						<PanelLeftOpen class="h-4 w-4" />
+					</button>
+				{/if}
+				<!-- Search trigger -->
+				<button
+					onclick={() => commandPalette.open()}
+					class="flex-1 flex items-center gap-2 h-8 max-w-xs rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-muted)] px-3 text-sm text-[var(--color-muted-fg)] hover:border-[var(--color-primary)]/50 transition-colors"
+				>
+					<Search class="h-3.5 w-3.5 shrink-0" />
+					<span class="flex-1 text-left text-xs">Search…</span>
+					<kbd class="hidden sm:inline-flex items-center gap-0.5 text-[10px] font-mono opacity-60">⌘K</kbd>
+				</button>
+				<div class="flex items-center gap-1 ml-auto shrink-0">
 				<a
 					href="/notifications"
 					class="relative p-2 rounded-[var(--radius-sm)] text-[var(--color-muted-fg)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] transition-colors"
@@ -283,12 +340,31 @@
 						</div>
 					</button>
 				</div>
+				</div><!-- end flex items-center gap-1 ml-auto -->
 			</header>
 			<main class="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 pb-20 lg:pb-8">
 				{@render children()}
 			</main>
 		</div>
 	</div>
+
+	<CommandPalette />
+
+	<!-- Floating AI button -->
+	<button
+		onclick={() => aiChat.toggle()}
+		title="AI Assistant"
+		class="
+			fixed right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full
+			bg-[var(--color-primary)] text-white shadow-[var(--shadow-lg)]
+			hover:opacity-90 active:scale-95 transition-all
+			bottom-20 lg:bottom-5
+		"
+	>
+		<Bot class="h-5 w-5" />
+	</button>
+
+	<AiChatPanel />
 
 	<!-- Mobile bottom tab bar (hidden on lg+) -->
 	<nav class="fixed bottom-0 left-0 right-0 z-30 flex border-t border-[var(--color-border)] bg-[var(--color-card)] lg:hidden">

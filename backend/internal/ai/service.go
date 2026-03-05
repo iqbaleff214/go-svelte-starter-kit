@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,24 +19,30 @@ import (
 )
 
 type Service struct {
-	repo      *Repository
-	client    anthropic.Client
-	model     string
-	sysPrompt string
-	tools     []Tool
-	ttl       config.AIConfig
+	repo            *Repository
+	client          anthropic.Client
+	model           string
+	geminiKey       string
+	geminiModel     string
+	defaultProvider string
+	sysPrompt       string
+	tools           []Tool
+	ttl             config.AIConfig
 }
 
 func NewService(repo *Repository, cfg config.AIConfig, notifRepo *notification.Repository, rbacRepo *rbac.Repository) *Service {
 	client := anthropic.NewClient(option.WithAPIKey(cfg.AnthropicKey))
 	tools := buildTools(notifRepo, rbacRepo)
 	return &Service{
-		repo:      repo,
-		client:    client,
-		model:     cfg.Model,
-		sysPrompt: cfg.SystemPrompt,
-		tools:     tools,
-		ttl:       cfg,
+		repo:            repo,
+		client:          client,
+		model:           cfg.Model,
+		geminiKey:       cfg.GeminiKey,
+		geminiModel:     cfg.GeminiModel,
+		defaultProvider: cfg.Provider,
+		sysPrompt:       cfg.SystemPrompt,
+		tools:           tools,
+		ttl:             cfg,
 	}
 }
 
@@ -55,9 +63,20 @@ func (s *Service) findTool(name string) *Tool {
 	return nil
 }
 
-// Chat runs the agentic streaming loop, writing SSE events to w.
+// Chat dispatches to the appropriate provider.
 func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
-	// Load or create conversation
+	provider := req.Provider
+	if provider == "" {
+		provider = s.defaultProvider
+	}
+	if provider == "gemini" {
+		return s.chatWithGemini(ctx, userID, req, w)
+	}
+	return s.chatWithAnthropic(ctx, userID, claims, req, w)
+}
+
+// chatWithAnthropic runs the agentic streaming loop using the Anthropic API.
+func (s *Service) chatWithAnthropic(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
 	var conv *Conversation
 	var err error
 	if req.ConversationID != nil && *req.ConversationID != "" {
@@ -74,21 +93,17 @@ func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Clai
 		return fmt.Errorf("load conversation: %w", err)
 	}
 
-	// Emit start event
 	writeSSE(w, map[string]any{"type": "start", "conversation_id": conv.ID.String()})
 	flush(w)
 
-	// Build API message list from stored history
 	apiMessages := msgsToParams(conv.Messages)
 	apiMessages = append(apiMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(req.Message)))
 
-	// storedMessages tracks only user/assistant (no tool internals) for persistence
 	storedMessages := append(conv.Messages, ChatMessage{Role: "user", Content: req.Message})
 
 	var assistantText strings.Builder
 	var totalTokens int
 
-	// Agentic loop
 	for {
 		params := anthropic.MessageNewParams{
 			Model:     anthropic.Model(s.model),
@@ -121,7 +136,7 @@ func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Clai
 
 		if err := stream.Err(); err != nil {
 			if ctx.Err() != nil {
-				return nil // client disconnected
+				return nil
 			}
 			writeSSE(w, map[string]any{"type": "error", "message": "Stream error"})
 			flush(w)
@@ -136,17 +151,14 @@ func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Clai
 			if text != "" {
 				storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
 			}
-			// persist
 			_ = s.repo.UpdateConversation(ctx, conv.ID, storedMessages, totalTokens)
 			writeSSE(w, map[string]any{"type": "done", "token_usage": totalTokens})
 			flush(w)
 			return nil
 
 		case anthropic.StopReasonToolUse:
-			// Append the assistant turn (with tool_use blocks) to API messages
 			apiMessages = append(apiMessages, accMsg.ToParam())
 
-			// Execute tools and collect results
 			var toolResults []anthropic.ContentBlockParamUnion
 			for _, block := range accMsg.Content {
 				if block.Type != "tool_use" {
@@ -157,14 +169,11 @@ func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Clai
 				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolUse.ID, result, false))
 			}
 
-			// Append tool results as user turn
 			if len(toolResults) > 0 {
 				apiMessages = append(apiMessages, anthropic.NewUserMessage(toolResults...))
 			}
-			// continue loop
 
 		default:
-			// Unexpected stop reason — treat as done
 			text := assistantText.String()
 			if text != "" {
 				storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
@@ -175,6 +184,158 @@ func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Clai
 			return nil
 		}
 	}
+}
+
+// chatWithGemini streams a response using the Google Gemini REST API.
+func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, req ChatRequest, w http.ResponseWriter) error {
+	if s.geminiKey == "" {
+		writeSSE(w, map[string]any{"type": "error", "message": "Gemini API key not configured"})
+		flush(w)
+		return fmt.Errorf("gemini key not set")
+	}
+
+	var conv *Conversation
+	var err error
+	modelLabel := "gemini/" + s.geminiModel
+	if req.ConversationID != nil && *req.ConversationID != "" {
+		id, parseErr := uuid.Parse(*req.ConversationID)
+		if parseErr != nil {
+			return fmt.Errorf("invalid conversation_id")
+		}
+		conv, err = s.repo.GetConversation(ctx, id, userID)
+	} else {
+		title := truncate(req.Message, 60)
+		conv, err = s.repo.CreateConversation(ctx, userID, title, modelLabel, []ChatMessage{})
+	}
+	if err != nil {
+		return fmt.Errorf("load conversation: %w", err)
+	}
+
+	writeSSE(w, map[string]any{"type": "start", "conversation_id": conv.ID.String()})
+	flush(w)
+
+	// Build Gemini request body
+	type geminiPart struct {
+		Text string `json:"text"`
+	}
+	type geminiContent struct {
+		Role  string       `json:"role"`
+		Parts []geminiPart `json:"parts"`
+	}
+	type geminiSysInstruction struct {
+		Parts []geminiPart `json:"parts"`
+	}
+	type geminiGenConfig struct {
+		MaxOutputTokens int `json:"maxOutputTokens"`
+	}
+	type geminiRequest struct {
+		Contents          []geminiContent       `json:"contents"`
+		SystemInstruction *geminiSysInstruction `json:"systemInstruction,omitempty"`
+		GenerationConfig  geminiGenConfig       `json:"generationConfig"`
+	}
+
+	var contents []geminiContent
+	for _, m := range conv.Messages {
+		role := m.Role
+		if role == "assistant" {
+			role = "model"
+		}
+		contents = append(contents, geminiContent{Role: role, Parts: []geminiPart{{Text: m.Content}}})
+	}
+	contents = append(contents, geminiContent{Role: "user", Parts: []geminiPart{{Text: req.Message}}})
+
+	gemReq := geminiRequest{
+		Contents:         contents,
+		GenerationConfig: geminiGenConfig{MaxOutputTokens: 8192},
+	}
+	if s.sysPrompt != "" {
+		gemReq.SystemInstruction = &geminiSysInstruction{Parts: []geminiPart{{Text: s.sysPrompt}}}
+	}
+
+	reqBody, _ := json.Marshal(gemReq)
+	url := fmt.Sprintf(
+		"https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
+		s.geminiModel, s.geminiKey,
+	)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		writeSSE(w, map[string]any{"type": "error", "message": "Gemini request failed"})
+		flush(w)
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		writeSSE(w, map[string]any{"type": "error", "message": fmt.Sprintf("Gemini API error (status %d)", resp.StatusCode)})
+		flush(w)
+		return fmt.Errorf("gemini status %d", resp.StatusCode)
+	}
+
+	// Parse SSE stream from Gemini
+	var geminiEvent struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+		UsageMetadata struct {
+			TotalTokenCount int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
+	}
+
+	var assistantText strings.Builder
+	var totalTokens int
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := line[6:]
+		if err := json.Unmarshal([]byte(data), &geminiEvent); err != nil {
+			continue
+		}
+		if len(geminiEvent.Candidates) > 0 {
+			for _, part := range geminiEvent.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					assistantText.WriteString(part.Text)
+					writeSSE(w, map[string]any{"type": "delta", "text": part.Text})
+					flush(w)
+				}
+			}
+			if geminiEvent.UsageMetadata.TotalTokenCount > 0 {
+				totalTokens = geminiEvent.UsageMetadata.TotalTokenCount
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		return err
+	}
+
+	storedMessages := append(conv.Messages, ChatMessage{Role: "user", Content: req.Message})
+	if text := assistantText.String(); text != "" {
+		storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
+	}
+	_ = s.repo.UpdateConversation(ctx, conv.ID, storedMessages, totalTokens)
+	writeSSE(w, map[string]any{"type": "done", "token_usage": totalTokens})
+	flush(w)
+
+	return nil
 }
 
 func (s *Service) executeTool(ctx context.Context, claims *token.Claims, name string, inputRaw json.RawMessage) string {
@@ -212,7 +373,7 @@ func (s *Service) PurgeOldConversations(ctx context.Context) error {
 	return s.repo.PurgeOldConversations(ctx, s.ttl.ConversationTTL)
 }
 
-// helpers
+// ---- helpers ----
 
 func msgsToParams(msgs []ChatMessage) []anthropic.MessageParam {
 	params := make([]anthropic.MessageParam, 0, len(msgs))

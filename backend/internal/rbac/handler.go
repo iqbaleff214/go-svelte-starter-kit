@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
 	"github.com/404nfid/go-svelte-starter-kit/internal/middleware"
@@ -264,6 +265,26 @@ func (h *Handler) SetPermissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, envelope{"data": role})
+}
+
+// ---- Search ----
+
+// GET /api/admin/search?q=...
+func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		respondJSON(w, http.StatusOK, envelope{"data": SearchResponse{
+			Users: []*SearchResult{},
+			Roles: []*SearchResult{},
+		}})
+		return
+	}
+	result, err := h.svc.Search(r.Context(), q)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal_error", "Search failed")
+		return
+	}
+	respondJSON(w, http.StatusOK, envelope{"data": result})
 }
 
 // ---- Permissions ----

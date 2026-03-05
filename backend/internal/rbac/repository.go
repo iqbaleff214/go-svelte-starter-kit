@@ -333,3 +333,68 @@ func (r *Repository) GetRoleNameByID(ctx context.Context, roleID uuid.UUID) (str
 	}
 	return name, nil
 }
+
+// SearchUsers returns up to limit users whose display_name or email match the query (case-insensitive).
+func (r *Repository) SearchUsers(ctx context.Context, q string, limit int) ([]*SearchResult, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT u.id, u.email, u.display_name, u.avatar_url
+		FROM users u
+		WHERE u.deleted_at IS NULL
+		  AND (u.display_name ILIKE '%' || $1 || '%' OR u.email ILIKE '%' || $1 || '%')
+		ORDER BY u.display_name ASC
+		LIMIT $2`, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*SearchResult
+	for rows.Next() {
+		var id uuid.UUID
+		var email, displayName string
+		var avatarURL *string
+		if err := rows.Scan(&id, &email, &displayName, &avatarURL); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		results = append(results, &SearchResult{
+			Type:      "user",
+			ID:        id.String(),
+			Title:     displayName,
+			Subtitle:  email,
+			AvatarURL: avatarURL,
+			Href:      "/admin/users",
+		})
+	}
+	return results, nil
+}
+
+// SearchRoles returns up to limit roles whose name matches the query (case-insensitive).
+func (r *Repository) SearchRoles(ctx context.Context, q string, limit int) ([]*SearchResult, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT id, name, COALESCE(description, '')
+		FROM roles
+		WHERE name ILIKE '%' || $1 || '%'
+		ORDER BY name ASC
+		LIMIT $2`, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search roles: %w", err)
+	}
+	defer rows.Close()
+
+	var results []*SearchResult
+	for rows.Next() {
+		var id uuid.UUID
+		var name, description string
+		if err := rows.Scan(&id, &name, &description); err != nil {
+			return nil, fmt.Errorf("scan role: %w", err)
+		}
+		results = append(results, &SearchResult{
+			Type:     "role",
+			ID:       id.String(),
+			Title:    name,
+			Subtitle: description,
+			Href:     "/admin/roles",
+		})
+	}
+	return results, nil
+}
