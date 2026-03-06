@@ -46,3 +46,12 @@ JOIN permissions p ON p.name IN (
     'ai:access'
 )
 WHERE r.name = 'user';
+
+-- Create an initial superadmin user
+INSERT INTO users (id, email, password_hash, display_name) VALUES
+    (uuid_generate_v4(), 'iqbaleff214@gmail.com', '$2a$12$naOaHBgGGjsm9NbDL7Si/uYFvZwyUYpUVJci1O/m48BSReC0IaVMO', 'Super Admin');
+-- Assign superadmin role to the initial user
+INSERT INTO user_roles (user_id, role_id)
+SELECT u.id, r.id
+FROM users u, roles r
+WHERE u.email = 'iqbaleff214@gmail.com' AND r.name = 'superadmin';
