@@ -5,16 +5,12 @@
 	import { authStore, preAuthToken } from '$stores/auth';
 	import { toast } from '$stores/toast';
 	import { goto } from '$app/navigation';
-	import type { ApiError, FieldError } from '$types';
+	import type { ApiError } from '$types';
 
 	let email = $state('');
 	let password = $state('');
 	let loading = $state(false);
 	let errors = $state<Record<string, string>>({});
-
-	function fieldError(field: string, fieldErrors: FieldError[]): string {
-		return fieldErrors.find((e) => e.field === field)?.message ?? '';
-	}
 
 	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
