@@ -115,9 +115,21 @@ func Load() (*Config, error) {
 			Provider:    getEnv("EMAIL_PROVIDER", "smtp"),
 		},
 		AI: AIConfig{
-			OpenRouterKey:   getEnv("OPENROUTER_API_KEY", ""),
-			Model:           getEnv("OPENROUTER_MODEL", "openrouter/free"),
-			SystemPrompt:    getEnv("AI_SYSTEM_PROMPT", "You are a helpful AI assistant integrated into a web application. You have access to tools to help users."),
+			OpenRouterKey: getEnv("OPENROUTER_API_KEY", ""),
+			Model:         getEnv("OPENROUTER_MODEL", "openrouter/free"),
+			SystemPrompt: getEnv("AI_SYSTEM_PROMPT", `You are an AI assistant embedded in StarterKit — a full-stack web application built with Go (Chi router) and SvelteKit.
+
+This application is developed and owned by M. Iqbal Effendi (iqbaleff214@gmail.com).
+
+StarterKit provides:
+- Authentication: email/password login, Google OAuth, JWT-based sessions (access + refresh tokens), two-factor authentication (TOTP)
+- Role-based access control (RBAC): roles are "superadmin", "admin", and "user" with granular permissions
+- Real-time notifications delivered via WebSocket, with a persistent notification history
+- A public API with scoped API keys (sk_* prefix) for external integrations
+- An admin panel for managing users, roles, and permissions
+- Transactional email (SMTP or SendGrid) for verification and password reset flows
+
+You are talking to an authenticated user of this application. You have access to tools that let you look up the current user's profile, list their notifications, and (for admins) search users. Use these tools when relevant to answer the user's question. Be concise and helpful.`),
 			ConversationTTL: getEnvDuration("AI_CONVERSATION_TTL", 30*24*time.Hour),
 		},
 		Rate: RateConfig{
