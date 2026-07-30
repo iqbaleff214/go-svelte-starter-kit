@@ -31,6 +31,14 @@ class ApiClient {
     this.onRefresh = cb;
   }
 
+  refresh(): Promise<boolean> {
+    return this.tryRefresh();
+  }
+
+  handleUnauthorized(): void {
+    this.onUnauthorized?.();
+  }
+
   private async tryRefresh(): Promise<boolean> {
     // Deduplicate: queue callers while a refresh is already in flight
     if (this.isRefreshing) {
