@@ -114,7 +114,7 @@ Copy `backend/.env.example` → `backend/.env` (done automatically by `make setu
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | No | SMTP credentials |
 | `SENDGRID_API_KEY` | No | SendGrid API key (if using sendgrid provider) |
 | `OPENROUTER_API_KEY` | No | OpenRouter API key |
-| `OPENROUTER_MODEL` | No | Model string (default: `openai/gpt-4o-mini`) |
+| `OPENROUTER_MODEL` | No | Model string (default: `openrouter/free`) |
 | `RATE_LIMIT_AUTH` | No | Auth endpoint rate limit req/min (default: `5`) |
 | `RATE_LIMIT_API` | No | General API rate limit req/min (default: `100`) |
 

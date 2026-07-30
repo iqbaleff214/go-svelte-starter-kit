@@ -52,13 +52,13 @@ type GoogleConfig struct {
 }
 
 type EmailConfig struct {
-	SMTPHost     string
-	SMTPPort     int
-	SMTPUser     string
-	SMTPPass     string
-	SMTPFrom     string
-	SendGridKey  string
-	Provider     string // "smtp" or "sendgrid"
+	SMTPHost    string
+	SMTPPort    int
+	SMTPUser    string
+	SMTPPass    string
+	SMTPFrom    string
+	SendGridKey string
+	Provider    string // "smtp" or "sendgrid"
 }
 
 type AIConfig struct {
@@ -69,9 +69,9 @@ type AIConfig struct {
 }
 
 type RateConfig struct {
-	AuthPerMin    int
-	APIPerMin     int
-	APIKeyPerMin  int
+	AuthPerMin   int
+	APIPerMin    int
+	APIKeyPerMin int
 }
 
 func Load() (*Config, error) {
@@ -116,7 +116,7 @@ func Load() (*Config, error) {
 		},
 		AI: AIConfig{
 			OpenRouterKey:   getEnv("OPENROUTER_API_KEY", ""),
-			Model:           getEnv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
+			Model:           getEnv("OPENROUTER_MODEL", "openrouter/free"),
 			SystemPrompt:    getEnv("AI_SYSTEM_PROMPT", "You are a helpful AI assistant integrated into a web application. You have access to tools to help users."),
 			ConversationTTL: getEnvDuration("AI_CONVERSATION_TTL", 30*24*time.Hour),
 		},
