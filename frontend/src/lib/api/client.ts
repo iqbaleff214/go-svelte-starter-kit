@@ -10,6 +10,7 @@ function getCsrfToken(): string | null {
 
 class ApiClient {
   private accessToken: string | null = null;
+  private onUnauthorized: (() => void) | null = null;
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
@@ -17,6 +18,10 @@ class ApiClient {
 
   getAccessToken(): string | null {
     return this.accessToken;
+  }
+
+  setOnUnauthorized(cb: () => void) {
+    this.onUnauthorized = cb;
   }
 
   private headers(): HeadersInit {
@@ -44,6 +49,9 @@ class ApiClient {
     });
 
     if (!res.ok) {
+      if (res.status === 401 && this.onUnauthorized) {
+        this.onUnauthorized();
+      }
       let error: ApiError = {
         code: "unknown_error",
         message: "An unexpected error occurred",
@@ -112,6 +120,9 @@ class ApiClient {
     });
 
     if (!res.ok) {
+      if (res.status === 401 && this.onUnauthorized) {
+        this.onUnauthorized();
+      }
       let error: ApiError = {
         code: "unknown_error",
         message: "An unexpected error occurred",
