@@ -152,7 +152,8 @@ class ApiClient {
     // Let the browser set Content-Type automatically so it includes the multipart boundary.
     const makeHeaders = () => {
       const headers: Record<string, string> = {};
-      if (this.accessToken) headers["Authorization"] = `Bearer ${this.accessToken}`;
+      if (this.accessToken)
+        headers["Authorization"] = `Bearer ${this.accessToken}`;
       const csrf = getCsrfToken();
       if (csrf) headers["X-CSRF-Token"] = csrf;
       return headers;
