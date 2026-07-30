@@ -347,7 +347,7 @@
 				</div>
 				</div><!-- end flex items-center gap-1 ml-auto -->
 			</header>
-			<main class="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 pb-20 lg:pb-8">
+			<main class="flex-1 min-h-0 {$page.url.pathname === '/ai' ? 'overflow-hidden' : 'overflow-auto p-4 sm:p-6 lg:p-8 pb-20 lg:pb-8'}">
 				{@render children()}
 			</main>
 		</div>
