@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 	import { aiApi } from '$api/ai';
 	import { toast } from '$stores/toast';
 	import { Trash2, Plus, Send, Square } from 'lucide-svelte';
@@ -169,7 +170,7 @@
 	}
 
 	function renderMarkdown(text: string): string {
-		return marked.parse(text) as string;
+		return DOMPurify.sanitize(marked.parse(text) as string);
 	}
 
 	function formatDate(iso: string) {

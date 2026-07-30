@@ -1,4 +1,4 @@
-import type { ApiError, ApiResponse } from "$types";
+import type { ApiError, ApiResponse, LoginResponse } from "$types";
 
 const BASE_URL = "/api";
 
@@ -11,6 +11,9 @@ function getCsrfToken(): string | null {
 class ApiClient {
   private accessToken: string | null = null;
   private onUnauthorized: (() => void) | null = null;
+  private onRefresh: ((user: unknown, token: string) => void) | null = null;
+  private isRefreshing = false;
+  private refreshQueue: Array<(success: boolean) => void> = [];
 
   setAccessToken(token: string | null) {
     this.accessToken = token;
@@ -22,6 +25,39 @@ class ApiClient {
 
   setOnUnauthorized(cb: () => void) {
     this.onUnauthorized = cb;
+  }
+
+  setOnRefresh(cb: (user: unknown, token: string) => void) {
+    this.onRefresh = cb;
+  }
+
+  private async tryRefresh(): Promise<boolean> {
+    // Deduplicate: queue callers while a refresh is already in flight
+    if (this.isRefreshing) {
+      return new Promise((resolve) => this.refreshQueue.push(resolve));
+    }
+
+    this.isRefreshing = true;
+    try {
+      const res = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("refresh failed");
+
+      const body = await res.json();
+      const { user, token } = body.data as LoginResponse;
+      this.accessToken = token.access_token;
+      this.onRefresh?.(user, token.access_token);
+      this.refreshQueue.forEach((cb) => cb(true));
+      return true;
+    } catch {
+      this.refreshQueue.forEach((cb) => cb(false));
+      return false;
+    } finally {
+      this.refreshQueue = [];
+      this.isRefreshing = false;
+    }
   }
 
   private headers(): HeadersInit {
@@ -41,7 +77,7 @@ class ApiClient {
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      credentials: "include", // include cookies for refresh token
+      credentials: "include",
       headers: {
         ...this.headers(),
         ...(init.headers ?? {}),
@@ -49,8 +85,10 @@ class ApiClient {
     });
 
     if (!res.ok) {
-      if (res.status === 401 && this.onUnauthorized) {
-        this.onUnauthorized();
+      if (res.status === 401 && path !== "/auth/refresh") {
+        const refreshed = await this.tryRefresh();
+        if (refreshed) return this.request<T>(path, init);
+        this.onUnauthorized?.();
       }
       let error: ApiError = {
         code: "unknown_error",
@@ -104,25 +142,34 @@ class ApiClient {
   async postForm<T>(path: string, form: FormData): Promise<T> {
     // Must NOT go through request() which always adds Content-Type: application/json.
     // Let the browser set Content-Type automatically so it includes the multipart boundary.
-    const headers: Record<string, string> = {};
-    if (this.accessToken) {
-      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    const makeHeaders = () => {
+      const headers: Record<string, string> = {};
+      if (this.accessToken) headers["Authorization"] = `Bearer ${this.accessToken}`;
+      const csrf = getCsrfToken();
+      if (csrf) headers["X-CSRF-Token"] = csrf;
+      return headers;
+    };
+
+    const doFetch = () =>
+      fetch(`${BASE_URL}${path}`, {
+        method: "POST",
+        body: form,
+        credentials: "include",
+        headers: makeHeaders(),
+      });
+
+    let res = await doFetch();
+
+    if (res.status === 401) {
+      const refreshed = await this.tryRefresh();
+      if (refreshed) {
+        res = await doFetch(); // retry with new token in headers
+      } else {
+        this.onUnauthorized?.();
+      }
     }
-    const csrf = getCsrfToken();
-    if (csrf) {
-      headers["X-CSRF-Token"] = csrf;
-    }
-    const res = await fetch(`${BASE_URL}${path}`, {
-      method: "POST",
-      body: form,
-      credentials: "include",
-      headers,
-    });
 
     if (!res.ok) {
-      if (res.status === 401 && this.onUnauthorized) {
-        this.onUnauthorized();
-      }
       let error: ApiError = {
         code: "unknown_error",
         message: "An unexpected error occurred",

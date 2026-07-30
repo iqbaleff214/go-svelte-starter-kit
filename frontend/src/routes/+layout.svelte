@@ -15,7 +15,12 @@
 	// circular dependency that caused "Cannot access before initialization".
 	authStore.subscribe((state) => api.setAccessToken(state.accessToken));
 
-	// On any 401, clear auth state and boot user to login.
+	// After a silent token refresh succeeds mid-request, update the auth store.
+	api.setOnRefresh((user, token) => {
+		authStore.setAuth(user as import('$types').User, token);
+	});
+
+	// Refresh failed or refresh token expired — clear state and boot to login.
 	api.setOnUnauthorized(() => {
 		authStore.clearAuth();
 		const path = window.location.pathname;

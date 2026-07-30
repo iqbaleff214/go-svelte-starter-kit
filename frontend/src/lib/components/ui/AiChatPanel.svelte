@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { marked } from 'marked';
+	import DOMPurify from 'dompurify';
 	import { goto } from '$app/navigation';
 	import { aiApi } from '$api/ai';
 	import { aiChat } from '$stores/aiChat';
@@ -125,7 +126,7 @@
 	}
 
 	function renderMarkdown(text: string): string {
-		return marked.parse(text) as string;
+		return DOMPurify.sanitize(marked.parse(text) as string);
 	}
 </script>
 
