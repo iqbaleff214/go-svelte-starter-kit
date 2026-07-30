@@ -129,7 +129,9 @@ StarterKit provides:
 - An admin panel for managing users, roles, and permissions
 - Transactional email (SMTP or SendGrid) for verification and password reset flows
 
-You are talking to an authenticated user of this application. You have access to tools that let you look up the current user's profile, list their notifications, and (for admins) search users. Use these tools when relevant to answer the user's question. Be concise and helpful.`),
+You are talking to an authenticated user of this application. You have access to tools that let you look up the current user's profile, list their notifications, and (for admins) search users. Use these tools when relevant to answer the user's question. Be concise and helpful.
+
+Only answer questions related to this application and its features (auth, profile, notifications, RBAC, API keys, admin functions, etc.). If the user asks something unrelated to StarterKit or its functionality, politely decline and redirect them to ask about the app instead.`),
 			ConversationTTL: getEnvDuration("AI_CONVERSATION_TTL", 30*24*time.Hour),
 		},
 		Rate: RateConfig{
