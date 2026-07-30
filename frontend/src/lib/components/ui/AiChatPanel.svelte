@@ -14,7 +14,6 @@
 	let streaming = $state(false);
 	let input = $state('');
 	let activeConvId = $state<string | null>(null);
-	let provider = $state<'anthropic' | 'gemini'>('anthropic');
 	let messagesEl = $state<HTMLDivElement | null>(null);
 	let textareaEl = $state<HTMLTextAreaElement | null>(null);
 
@@ -32,12 +31,6 @@
 		messages = [];
 		streamingText = '';
 		input = '';
-	}
-
-	function toggleProvider() {
-		if (streaming) return;
-		provider = provider === 'anthropic' ? 'gemini' : 'anthropic';
-		newChat();
 	}
 
 	function close() {
@@ -64,7 +57,7 @@
 
 		abortCtrl = new AbortController();
 		try {
-			const resp = await aiApi.streamChat(msg, activeConvId, abortCtrl.signal, provider);
+			const resp = await aiApi.streamChat(msg, activeConvId, abortCtrl.signal);
 			if (!resp.ok || !resp.body) throw new Error('Stream failed');
 
 			const reader = resp.body.getReader();
@@ -155,21 +148,6 @@
 		<div class="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-4">
 			<Bot class="h-4 w-4 text-[var(--color-primary)] shrink-0" />
 			<span class="text-sm font-semibold text-[var(--color-foreground)]">AI Assistant</span>
-			<!-- Provider toggle -->
-			<button
-				onclick={toggleProvider}
-				disabled={streaming}
-				title="Switch provider"
-				class="ml-1 flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--color-muted-fg)] hover:text-[var(--color-foreground)] transition-colors disabled:opacity-40"
-			>
-				{#if provider === 'anthropic'}
-					<span class="h-1.5 w-1.5 rounded-full bg-orange-400 shrink-0"></span>
-					Anthropic
-				{:else}
-					<span class="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0"></span>
-					Gemini
-				{/if}
-			</button>
 			<span class="flex-1"></span>
 			<button
 				onclick={newChat}

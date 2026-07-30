@@ -13,150 +13,132 @@ import (
 	"github.com/404nfid/go-svelte-starter-kit/internal/rbac"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/token"
-	anthropic "github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/google/uuid"
 )
 
-// ---- Gemini API types ----
+// ---- OpenRouter (OpenAI-compatible) types ----
 
-type geminiPart struct {
-	Text             string                  `json:"text,omitempty"`
-	FunctionCall     *geminiFunctionCall     `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionResponse `json:"functionResponse,omitempty"`
+type orMessage struct {
+	Role       string      `json:"role"`
+	Content    string      `json:"content,omitempty"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	ToolCalls  []orToolCall `json:"tool_calls,omitempty"`
 }
 
-type geminiFunctionCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args"`
+type orToolCall struct {
+	ID       string     `json:"id"`
+	Type     string     `json:"type"`
+	Function orFuncCall `json:"function"`
 }
 
-type geminiFunctionResponse struct {
-	Name     string         `json:"name"`
-	Response map[string]any `json:"response"`
+type orFuncCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
-type geminiContent struct {
-	Role  string       `json:"role,omitempty"`
-	Parts []geminiPart `json:"parts"`
+type orTool struct {
+	Type     string    `json:"type"`
+	Function orToolDef `json:"function"`
 }
 
-type geminiTool struct {
-	FunctionDeclarations []map[string]any `json:"functionDeclarations"`
+type orToolDef struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters"`
 }
 
-type geminiGenConfig struct {
-	MaxOutputTokens int `json:"maxOutputTokens"`
+type orRequest struct {
+	Model     string      `json:"model"`
+	Messages  []orMessage `json:"messages"`
+	Stream    bool        `json:"stream"`
+	MaxTokens int         `json:"max_tokens,omitempty"`
+	Tools     []orTool    `json:"tools,omitempty"`
 }
 
-type geminiRequest struct {
-	Contents          []geminiContent `json:"contents"`
-	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
-	GenerationConfig  geminiGenConfig `json:"generationConfig"`
-	Tools             []geminiTool    `json:"tools,omitempty"`
+type orChunk struct {
+	Choices []orChunkChoice `json:"choices"`
+	Usage   *orUsage        `json:"usage,omitempty"`
 }
 
-type geminiEvent struct {
-	Candidates []struct {
-		Content      geminiContent `json:"content"`
-		FinishReason string        `json:"finishReason"`
-	} `json:"candidates"`
-	UsageMetadata struct {
-		TotalTokenCount int `json:"totalTokenCount"`
-	} `json:"usageMetadata"`
+type orChunkChoice struct {
+	Delta        orDelta `json:"delta"`
+	FinishReason string  `json:"finish_reason"`
+}
+
+type orDelta struct {
+	Content   string            `json:"content,omitempty"`
+	ToolCalls []orToolCallDelta `json:"tool_calls,omitempty"`
+}
+
+type orToolCallDelta struct {
+	Index    int         `json:"index"`
+	ID       string      `json:"id,omitempty"`
+	Type     string      `json:"type,omitempty"`
+	Function orFuncDelta `json:"function"`
+}
+
+type orFuncDelta struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+type orUsage struct {
+	TotalTokens int `json:"total_tokens"`
 }
 
 // ---- Service ----
 
 type Service struct {
-	repo            *Repository
-	client          anthropic.Client
-	model           string
-	geminiKey       string
-	geminiModel     string
-	defaultProvider string
-	sysPrompt       string
-	tools           []Tool
-	ttl             config.AIConfig
+	repo      *Repository
+	apiKey    string
+	model     string
+	sysPrompt string
+	tools     []Tool
+	ttl       config.AIConfig
 }
 
 func NewService(repo *Repository, cfg config.AIConfig, notifRepo *notification.Repository, rbacRepo *rbac.Repository) *Service {
-	client := anthropic.NewClient(option.WithAPIKey(cfg.AnthropicKey))
-	tools := buildTools(notifRepo, rbacRepo)
 	return &Service{
-		repo:            repo,
-		client:          client,
-		model:           cfg.Model,
-		geminiKey:       cfg.GeminiKey,
-		geminiModel:     cfg.GeminiModel,
-		defaultProvider: cfg.Provider,
-		sysPrompt:       cfg.SystemPrompt,
-		tools:           tools,
-		ttl:             cfg,
+		repo:      repo,
+		apiKey:    cfg.OpenRouterKey,
+		model:     cfg.Model,
+		sysPrompt: cfg.SystemPrompt,
+		tools:     buildTools(notifRepo, rbacRepo),
+		ttl:       cfg,
 	}
 }
 
-func (s *Service) toolParams() []anthropic.ToolUnionParam {
-	params := make([]anthropic.ToolUnionParam, len(s.tools))
-	for i, t := range s.tools {
-		params[i] = t.Param
+func (s *Service) orTools() []orTool {
+	result := make([]orTool, 0, len(s.tools))
+	for _, t := range s.tools {
+		result = append(result, orTool{
+			Type: "function",
+			Function: orToolDef{
+				Name:        t.Def.Name,
+				Description: t.Def.Description,
+				Parameters:  t.Def.Parameters,
+			},
+		})
 	}
-	return params
+	return result
 }
 
 func (s *Service) findTool(name string) *Tool {
 	for i := range s.tools {
-		if s.tools[i].Param.OfTool != nil && s.tools[i].Param.OfTool.Name == name {
+		if s.tools[i].Def.Name == name {
 			return &s.tools[i]
 		}
 	}
 	return nil
 }
 
-// geminiTools converts the service's tool list to the Gemini function-declaration format.
-func (s *Service) geminiTools() []geminiTool {
-	decls := make([]map[string]any, 0, len(s.tools))
-	for _, t := range s.tools {
-		if t.Param.OfTool == nil {
-			continue
-		}
-		tool := t.Param.OfTool
-		schema := map[string]any{
-			"type":       "object",
-			"properties": tool.InputSchema.Properties,
-		}
-		if len(tool.InputSchema.Required) > 0 {
-			schema["required"] = tool.InputSchema.Required
-		}
-		decl := map[string]any{
-			"name":       tool.Name,
-			"parameters": schema,
-		}
-		if t.Description != "" {
-			decl["description"] = t.Description
-		}
-		decls = append(decls, decl)
-	}
-	if len(decls) == 0 {
-		return nil
-	}
-	return []geminiTool{{FunctionDeclarations: decls}}
-}
-
-// Chat dispatches to the appropriate provider.
 func (s *Service) Chat(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
-	provider := req.Provider
-	if provider == "" {
-		provider = s.defaultProvider
+	if s.apiKey == "" {
+		writeSSE(w, map[string]any{"type": "error", "message": "OpenRouter API key not configured"})
+		flush(w)
+		return fmt.Errorf("openrouter key not set")
 	}
-	if provider == "gemini" {
-		return s.chatWithGemini(ctx, userID, claims, req, w)
-	}
-	return s.chatWithAnthropic(ctx, userID, claims, req, w)
-}
 
-// chatWithAnthropic runs the agentic streaming loop using the Anthropic API.
-func (s *Service) chatWithAnthropic(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
 	var conv *Conversation
 	var err error
 	if req.ConversationID != nil && *req.ConversationID != "" {
@@ -176,183 +158,59 @@ func (s *Service) chatWithAnthropic(ctx context.Context, userID uuid.UUID, claim
 	writeSSE(w, map[string]any{"type": "start", "conversation_id": conv.ID.String()})
 	flush(w)
 
-	apiMessages := msgsToParams(conv.Messages)
-	apiMessages = append(apiMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(req.Message)))
-
-	storedMessages := append(conv.Messages, ChatMessage{Role: "user", Content: req.Message})
-
-	var assistantText strings.Builder
-	var totalTokens int
-
-	for {
-		params := anthropic.MessageNewParams{
-			Model:     anthropic.Model(s.model),
-			MaxTokens: 8192,
-			Messages:  apiMessages,
-			Tools:     s.toolParams(),
-		}
-		if s.sysPrompt != "" {
-			params.System = []anthropic.TextBlockParam{{Text: s.sysPrompt}}
-		}
-
-		stream := s.client.Messages.NewStreaming(ctx, params)
-
-		var accMsg anthropic.Message
-		assistantText.Reset()
-
-		for stream.Next() {
-			event := stream.Current()
-			if accErr := accMsg.Accumulate(event); accErr != nil {
-				continue
-			}
-			if ev, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
-				if delta, ok := ev.Delta.AsAny().(anthropic.TextDelta); ok {
-					assistantText.WriteString(delta.Text)
-					writeSSE(w, map[string]any{"type": "delta", "text": delta.Text})
-					flush(w)
-				}
-			}
-		}
-
-		if err := stream.Err(); err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			writeSSE(w, map[string]any{"type": "error", "message": "Stream error"})
-			flush(w)
-			return err
-		}
-
-		totalTokens += int(accMsg.Usage.OutputTokens)
-
-		switch accMsg.StopReason {
-		case anthropic.StopReasonEndTurn, anthropic.StopReasonMaxTokens, anthropic.StopReasonStopSequence:
-			text := assistantText.String()
-			if text != "" {
-				storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
-			}
-			_ = s.repo.UpdateConversation(ctx, conv.ID, storedMessages, totalTokens)
-			writeSSE(w, map[string]any{"type": "done", "token_usage": totalTokens})
-			flush(w)
-			return nil
-
-		case anthropic.StopReasonToolUse:
-			apiMessages = append(apiMessages, accMsg.ToParam())
-
-			var toolResults []anthropic.ContentBlockParamUnion
-			for _, block := range accMsg.Content {
-				if block.Type != "tool_use" {
-					continue
-				}
-				toolUse := block.AsToolUse()
-				result := s.executeTool(ctx, claims, toolUse.Name, toolUse.Input)
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolUse.ID, result, false))
-			}
-
-			if len(toolResults) > 0 {
-				apiMessages = append(apiMessages, anthropic.NewUserMessage(toolResults...))
-			}
-
-		default:
-			text := assistantText.String()
-			if text != "" {
-				storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
-			}
-			_ = s.repo.UpdateConversation(ctx, conv.ID, storedMessages, totalTokens)
-			writeSSE(w, map[string]any{"type": "done", "token_usage": totalTokens})
-			flush(w)
-			return nil
-		}
+	messages := make([]orMessage, 0, len(conv.Messages)+2)
+	if s.sysPrompt != "" {
+		messages = append(messages, orMessage{Role: "system", Content: s.sysPrompt})
 	}
-}
-
-// chatWithGemini runs the agentic streaming loop using the Google Gemini REST API.
-// It mirrors chatWithAnthropic: tools are declared in the request, function calls
-// are detected in the response, executed, and fed back until the model stops.
-func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, claims *token.Claims, req ChatRequest, w http.ResponseWriter) error {
-	if s.geminiKey == "" {
-		writeSSE(w, map[string]any{"type": "error", "message": "Gemini API key not configured"})
-		flush(w)
-		return fmt.Errorf("gemini key not set")
-	}
-
-	var conv *Conversation
-	var err error
-	modelLabel := "gemini/" + s.geminiModel
-	if req.ConversationID != nil && *req.ConversationID != "" {
-		id, parseErr := uuid.Parse(*req.ConversationID)
-		if parseErr != nil {
-			return fmt.Errorf("invalid conversation_id")
-		}
-		conv, err = s.repo.GetConversation(ctx, id, userID)
-	} else {
-		title := truncate(req.Message, 60)
-		conv, err = s.repo.CreateConversation(ctx, userID, title, modelLabel, []ChatMessage{})
-	}
-	if err != nil {
-		return fmt.Errorf("load conversation: %w", err)
-	}
-
-	writeSSE(w, map[string]any{"type": "start", "conversation_id": conv.ID.String()})
-	flush(w)
-
-	// Build conversation history as Gemini contents.
-	contents := make([]geminiContent, 0, len(conv.Messages)+1)
 	for _, m := range conv.Messages {
-		role := m.Role
-		if role == "assistant" {
-			role = "model"
-		}
-		contents = append(contents, geminiContent{Role: role, Parts: []geminiPart{{Text: m.Content}}})
+		messages = append(messages, orMessage{Role: m.Role, Content: m.Content})
 	}
-	contents = append(contents, geminiContent{Role: "user", Parts: []geminiPart{{Text: req.Message}}})
+	messages = append(messages, orMessage{Role: "user", Content: req.Message})
 
 	storedMessages := append(conv.Messages, ChatMessage{Role: "user", Content: req.Message})
 	var totalTokens int
 	var assistantText strings.Builder
 
-	geminiURL := fmt.Sprintf(
-		"https://generativelanguage.googleapis.com/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s",
-		s.geminiModel, s.geminiKey,
-	)
-
 	for {
-		gemReq := geminiRequest{
-			Contents:         contents,
-			GenerationConfig: geminiGenConfig{MaxOutputTokens: 8192},
-			Tools:            s.geminiTools(),
+		orReq := orRequest{
+			Model:     s.model,
+			Messages:  messages,
+			Stream:    true,
+			MaxTokens: 8192,
 		}
-		if s.sysPrompt != "" {
-			gemReq.SystemInstruction = &geminiContent{Parts: []geminiPart{{Text: s.sysPrompt}}}
+		if len(s.tools) > 0 {
+			orReq.Tools = s.orTools()
 		}
 
-		reqBody, _ := json.Marshal(gemReq)
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, geminiURL, bytes.NewReader(reqBody))
+		reqBody, _ := json.Marshal(orReq)
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://openrouter.ai/api/v1/chat/completions", bytes.NewReader(reqBody))
 		if err != nil {
 			return err
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
+		httpReq.Header.Set("HTTP-Referer", "https://github.com/404nfid/go-svelte-starter-kit")
 
 		resp, err := http.DefaultClient.Do(httpReq)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			writeSSE(w, map[string]any{"type": "error", "message": "Gemini request failed"})
+			writeSSE(w, map[string]any{"type": "error", "message": "OpenRouter request failed"})
 			flush(w)
 			return err
 		}
 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			writeSSE(w, map[string]any{"type": "error", "message": fmt.Sprintf("Gemini API error (status %d)", resp.StatusCode)})
+			writeSSE(w, map[string]any{"type": "error", "message": fmt.Sprintf("OpenRouter API error (status %d)", resp.StatusCode)})
 			flush(w)
-			return fmt.Errorf("gemini status %d", resp.StatusCode)
+			return fmt.Errorf("openrouter status %d", resp.StatusCode)
 		}
 
-		// Stream the SSE response, collecting text deltas and function calls.
-		var fnCalls []geminiFunctionCall
 		assistantText.Reset()
+		toolCallMap := map[int]*orToolCall{}
+		var finishReason string
 
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
@@ -360,25 +218,42 @@ func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, claims *
 			if !strings.HasPrefix(line, "data: ") {
 				continue
 			}
-			var event geminiEvent
-			if json.Unmarshal([]byte(line[6:]), &event) != nil {
+			data := line[6:]
+			if data == "[DONE]" {
+				break
+			}
+			var chunk orChunk
+			if json.Unmarshal([]byte(data), &chunk) != nil {
 				continue
 			}
-			if len(event.Candidates) == 0 {
+			if chunk.Usage != nil && chunk.Usage.TotalTokens > 0 {
+				totalTokens = chunk.Usage.TotalTokens
+			}
+			if len(chunk.Choices) == 0 {
 				continue
 			}
-			for _, part := range event.Candidates[0].Content.Parts {
-				switch {
-				case part.FunctionCall != nil:
-					fnCalls = append(fnCalls, *part.FunctionCall)
-				case part.Text != "":
-					assistantText.WriteString(part.Text)
-					writeSSE(w, map[string]any{"type": "delta", "text": part.Text})
-					flush(w)
+			choice := chunk.Choices[0]
+			if choice.FinishReason != "" {
+				finishReason = choice.FinishReason
+			}
+			if choice.Delta.Content != "" {
+				assistantText.WriteString(choice.Delta.Content)
+				writeSSE(w, map[string]any{"type": "delta", "text": choice.Delta.Content})
+				flush(w)
+			}
+			for _, tc := range choice.Delta.ToolCalls {
+				existing, ok := toolCallMap[tc.Index]
+				if !ok {
+					existing = &orToolCall{Type: "function"}
+					toolCallMap[tc.Index] = existing
 				}
-			}
-			if event.UsageMetadata.TotalTokenCount > 0 {
-				totalTokens = event.UsageMetadata.TotalTokenCount
+				if tc.ID != "" {
+					existing.ID = tc.ID
+				}
+				if tc.Function.Name != "" {
+					existing.Function.Name = tc.Function.Name
+				}
+				existing.Function.Arguments += tc.Function.Arguments
 			}
 		}
 		resp.Body.Close()
@@ -387,32 +262,27 @@ func (s *Service) chatWithGemini(ctx context.Context, userID uuid.UUID, claims *
 			return err
 		}
 
-		if len(fnCalls) > 0 {
-			// Append the model's function-call turn to the conversation context.
-			modelParts := make([]geminiPart, len(fnCalls))
-			for i := range fnCalls {
-				fc := fnCalls[i]
-				modelParts[i] = geminiPart{FunctionCall: &fc}
+		// Collect tool calls in index order
+		toolCalls := make([]orToolCall, len(toolCallMap))
+		for i := range len(toolCallMap) {
+			if tc, ok := toolCallMap[i]; ok {
+				toolCalls[i] = *tc
 			}
-			contents = append(contents, geminiContent{Role: "model", Parts: modelParts})
-
-			// Execute each tool and collect results.
-			userParts := make([]geminiPart, len(fnCalls))
-			for i, fc := range fnCalls {
-				rawArgs, _ := json.Marshal(fc.Args)
-				result := s.executeTool(ctx, claims, fc.Name, json.RawMessage(rawArgs))
-				userParts[i] = geminiPart{
-					FunctionResponse: &geminiFunctionResponse{
-						Name:     fc.Name,
-						Response: map[string]any{"result": result},
-					},
-				}
-			}
-			contents = append(contents, geminiContent{Role: "user", Parts: userParts})
-			continue // loop: send tool results back to Gemini
 		}
 
-		// No function calls — conversation is complete.
+		if finishReason == "tool_calls" && len(toolCalls) > 0 {
+			messages = append(messages, orMessage{Role: "assistant", ToolCalls: toolCalls})
+			for _, tc := range toolCalls {
+				result := s.executeTool(ctx, claims, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
+				messages = append(messages, orMessage{
+					Role:       "tool",
+					ToolCallID: tc.ID,
+					Content:    result,
+				})
+			}
+			continue
+		}
+
 		if text := assistantText.String(); text != "" {
 			storedMessages = append(storedMessages, ChatMessage{Role: "assistant", Content: text})
 		}
@@ -459,18 +329,6 @@ func (s *Service) PurgeOldConversations(ctx context.Context) error {
 }
 
 // ---- helpers ----
-
-func msgsToParams(msgs []ChatMessage) []anthropic.MessageParam {
-	params := make([]anthropic.MessageParam, 0, len(msgs))
-	for _, m := range msgs {
-		if m.Role == "user" {
-			params = append(params, anthropic.NewUserMessage(anthropic.NewTextBlock(m.Content)))
-		} else if m.Role == "assistant" {
-			params = append(params, anthropic.NewAssistantMessage(anthropic.NewTextBlock(m.Content)))
-		}
-	}
-	return params
-}
 
 func writeSSE(w http.ResponseWriter, data any) {
 	b, _ := json.Marshal(data)

@@ -62,11 +62,8 @@ type EmailConfig struct {
 }
 
 type AIConfig struct {
-	Provider        string // "anthropic" or "gemini"
-	AnthropicKey    string
+	OpenRouterKey   string
 	Model           string
-	GeminiKey       string
-	GeminiModel     string
 	SystemPrompt    string
 	ConversationTTL time.Duration
 }
@@ -118,11 +115,8 @@ func Load() (*Config, error) {
 			Provider:    getEnv("EMAIL_PROVIDER", "smtp"),
 		},
 		AI: AIConfig{
-			Provider:        getEnv("AI_PROVIDER", "anthropic"),
-			AnthropicKey:    getEnv("ANTHROPIC_API_KEY", ""),
-			Model:           getEnv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
-			GeminiKey:       getEnv("GEMINI_API_KEY", ""),
-			GeminiModel:     getEnv("GEMINI_MODEL", "gemini-2.0-flash"),
+			OpenRouterKey:   getEnv("OPENROUTER_API_KEY", ""),
+			Model:           getEnv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
 			SystemPrompt:    getEnv("AI_SYSTEM_PROMPT", "You are a helpful AI assistant integrated into a web application. You have access to tools to help users."),
 			ConversationTTL: getEnvDuration("AI_CONVERSATION_TTL", 30*24*time.Hour),
 		},

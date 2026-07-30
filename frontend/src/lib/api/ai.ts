@@ -7,7 +7,6 @@ export const aiApi = {
     message: string,
     conversationId?: string | null,
     signal?: AbortSignal,
-    provider?: string,
   ): Promise<Response> {
     const token = api.getAccessToken();
     const headers: HeadersInit = { "Content-Type": "application/json" };
@@ -21,7 +20,6 @@ export const aiApi = {
       body: JSON.stringify({
         message,
         conversation_id: conversationId ?? null,
-        provider: provider ?? "",
       }),
     });
   },

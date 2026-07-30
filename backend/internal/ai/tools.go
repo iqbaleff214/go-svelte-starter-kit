@@ -9,28 +9,33 @@ import (
 	"github.com/404nfid/go-svelte-starter-kit/internal/notification"
 	"github.com/404nfid/go-svelte-starter-kit/internal/rbac"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/token"
-	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/google/uuid"
 )
 
 type ToolInput map[string]any
 
+type ToolDef struct {
+	Name        string
+	Description string
+	Parameters  map[string]any
+}
+
 type Tool struct {
-	Param       anthropic.ToolUnionParam
-	Description string // used for Gemini function declarations
-	Execute     func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error)
+	Def     ToolDef
+	Execute func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error)
 }
 
 func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) []Tool {
 	return []Tool{
 		{
-			Param: anthropic.ToolUnionParamOfTool(
-				anthropic.ToolInputSchemaParam{
-					Properties: map[string]any{},
+			Def: ToolDef{
+				Name:        "get_current_user",
+				Description: "Get the currently authenticated user's profile, including user ID, email, and roles.",
+				Parameters: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{},
 				},
-				"get_current_user",
-			),
-			Description: "Get the currently authenticated user's profile, including user ID, email, and roles.",
+			},
 			Execute: func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error) {
 				result := map[string]any{
 					"user_id": claims.UserID,
@@ -42,18 +47,19 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 			},
 		},
 		{
-			Param: anthropic.ToolUnionParamOfTool(
-				anthropic.ToolInputSchemaParam{
-					Properties: map[string]any{
+			Def: ToolDef{
+				Name:        "list_notifications",
+				Description: "List recent notifications for the current user.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
 						"limit": map[string]any{
 							"type":        "integer",
 							"description": "Maximum number of notifications to return (default 10, max 50)",
 						},
 					},
 				},
-				"list_notifications",
-			),
-			Description: "List recent notifications for the current user.",
+			},
 			Execute: func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error) {
 				limit := 10
 				if v, ok := input["limit"]; ok {
@@ -83,9 +89,12 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 			},
 		},
 		{
-			Param: anthropic.ToolUnionParamOfTool(
-				anthropic.ToolInputSchemaParam{
-					Properties: map[string]any{
+			Def: ToolDef{
+				Name:        "search_users",
+				Description: "Search for users by email or display name. Only available to admins and superadmins.",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
 						"query": map[string]any{
 							"type":        "string",
 							"description": "Search query to filter users by email or display name",
@@ -95,11 +104,9 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 							"description": "Maximum number of users to return (default 10, max 50)",
 						},
 					},
-					Required: []string{"query"},
+					"required": []string{"query"},
 				},
-				"search_users",
-			),
-			Description: "Search for users by email or display name. Only available to admins and superadmins.",
+			},
 			Execute: func(ctx context.Context, claims *token.Claims, input ToolInput) (string, error) {
 				if !slices.Contains(claims.Roles, "admin") && !slices.Contains(claims.Roles, "superadmin") {
 					return `"Permission denied: only admins can search users"`, nil
@@ -118,7 +125,6 @@ func buildTools(notifRepo *notification.Repository, rbacRepo *rbac.Repository) [
 				if err != nil {
 					return fmt.Sprintf("error: %s", err.Error()), nil
 				}
-				// Client-side filter
 				var filtered []map[string]any
 				for _, u := range users {
 					if query == "" ||

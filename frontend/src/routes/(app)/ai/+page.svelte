@@ -14,7 +14,6 @@
 	let input = $state('');
 	let loading = $state(true);
 	let loadingConv = $state(false);
-	let provider = $state<'anthropic' | 'gemini'>('anthropic');
 	let messagesEl = $state<HTMLDivElement | null>(null);
 
 	let abortCtrl: AbortController | null = null;
@@ -54,12 +53,6 @@
 		input = '';
 	}
 
-	function toggleProvider() {
-		if (streaming) return;
-		provider = provider === 'anthropic' ? 'gemini' : 'anthropic';
-		newChat();
-	}
-
 	async function deleteConversation(id: string, e: MouseEvent) {
 		e.stopPropagation();
 		if (streaming && activeConvId === id) return;
@@ -88,7 +81,7 @@
 
 		abortCtrl = new AbortController();
 		try {
-			const resp = await aiApi.streamChat(msg, activeConvId, abortCtrl.signal, provider);
+			const resp = await aiApi.streamChat(msg, activeConvId, abortCtrl.signal);
 			if (!resp.ok || !resp.body) {
 				throw new Error('Stream failed');
 			}
@@ -200,31 +193,6 @@
 				<Plus class="h-4 w-4" />
 				New chat
 			</button>
-			<!-- Provider toggle -->
-			<div class="flex rounded-[var(--radius)] border border-[var(--color-border)] overflow-hidden text-xs font-medium">
-				<button
-					onclick={() => { if (provider !== 'anthropic') toggleProvider(); }}
-					disabled={streaming}
-					class="flex-1 flex items-center justify-center gap-1 py-1.5 transition-colors disabled:opacity-50
-						{provider === 'anthropic'
-							? 'bg-[var(--color-primary)] text-white'
-							: 'bg-[var(--color-muted)] text-[var(--color-muted-fg)] hover:text-[var(--color-foreground)]'}"
-				>
-					<span class="h-1.5 w-1.5 rounded-full bg-orange-400 shrink-0"></span>
-					Anthropic
-				</button>
-				<button
-					onclick={() => { if (provider !== 'gemini') toggleProvider(); }}
-					disabled={streaming}
-					class="flex-1 flex items-center justify-center gap-1 py-1.5 transition-colors disabled:opacity-50
-						{provider === 'gemini'
-							? 'bg-[var(--color-primary)] text-white'
-							: 'bg-[var(--color-muted)] text-[var(--color-muted-fg)] hover:text-[var(--color-foreground)]'}"
-				>
-					<span class="h-1.5 w-1.5 rounded-full bg-blue-400 shrink-0"></span>
-					Gemini
-				</button>
-			</div>
 		</div>
 
 		<div class="flex-1 overflow-y-auto p-2 flex flex-col gap-1">

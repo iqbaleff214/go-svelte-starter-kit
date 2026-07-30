@@ -13,7 +13,7 @@ A production-ready full-stack starter kit pairing a **Go** API backend with a **
 - **Auth** — Email/password + Google OAuth, JWT (access + refresh rotation), 2FA (TOTP)
 - **RBAC** — Role-based access control (`superadmin`, `admin`, `user`) with permission guards
 - **Notifications** — Real-time push via WebSocket + persistent notification history
-- **AI Chat** — Streaming chat completions via Anthropic Claude
+- **AI Chat** — Streaming chat completions via OpenRouter
 - **Public API** — API key management (`sk_*` prefix), per-key scopes, rate limiting, audit logs
 - **Webhooks** — Register URLs to receive event callbacks
 - **Admin Panel** — User management, role assignment, system stats
@@ -30,7 +30,7 @@ A production-ready full-stack starter kit pairing a **Go** API backend with a **
 | Database | PostgreSQL (pgx/v5 — no ORM) |
 | Cache / PubSub | Redis |
 | Auth | JWT (golang-jwt), bcrypt, TOTP (pquerna/otp) |
-| AI | Anthropic Claude + Google Gemini (streaming, switchable) |
+| AI | OpenRouter (streaming, OpenAI-compatible) |
 | Email | SMTP / SendGrid |
 | Migrations | [golang-migrate](https://github.com/golang-migrate/migrate) |
 | Styling | TailwindCSS v4 |
@@ -113,9 +113,8 @@ Copy `backend/.env.example` → `backend/.env` (done automatically by `make setu
 | `EMAIL_PROVIDER` | No | `smtp` or `sendgrid` |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | No | SMTP credentials |
 | `SENDGRID_API_KEY` | No | SendGrid API key (if using sendgrid provider) |
-| `AI_PROVIDER` | No | AI backend: `anthropic` (default) or `gemini` |
-| `ANTHROPIC_API_KEY` | No | Anthropic API key for Claude models |
-| `GEMINI_API_KEY` | No | Google Gemini API key |
+| `OPENROUTER_API_KEY` | No | OpenRouter API key |
+| `OPENROUTER_MODEL` | No | Model string (default: `openai/gpt-4o-mini`) |
 | `RATE_LIMIT_AUTH` | No | Auth endpoint rate limit req/min (default: `5`) |
 | `RATE_LIMIT_API` | No | General API rate limit req/min (default: `100`) |
 
