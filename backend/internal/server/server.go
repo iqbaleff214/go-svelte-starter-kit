@@ -18,6 +18,7 @@ import (
 	"github.com/404nfid/go-svelte-starter-kit/internal/rbac"
 	"github.com/404nfid/go-svelte-starter-kit/internal/user"
 	"github.com/404nfid/go-svelte-starter-kit/internal/webhook"
+	"github.com/404nfid/go-svelte-starter-kit/internal/whatsapp"
 	"github.com/404nfid/go-svelte-starter-kit/internal/ws"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
@@ -167,6 +168,17 @@ func (s *Server) routes() http.Handler {
 	apikeyHandler := apikey.NewHandler(apikeySvc, v)
 	apikeyAdapt := &apikeyAdapter{svc: apikeySvc}
 
+	// ---- WhatsApp ----
+	waRepo := whatsapp.NewRepository(s.db)
+	waManager, err := whatsapp.NewManager(s.cfg.Database.URL, waRepo, s.logger)
+	if err != nil {
+		s.logger.Error("whatsapp manager init failed", "error", err)
+	} else {
+		go waManager.RestoreConnected(context.Background())
+	}
+	waSvc := whatsapp.NewService(waRepo, waManager, s.cfg.Redis.URL, s.logger)
+	waHandler := whatsapp.NewHandler(waSvc, v, tokenManager)
+
 	// ---- Static file serving (avatars) ----
 	r.Handle("/uploads/*", http.StripPrefix("/uploads/", http.FileServer(http.Dir("uploads"))))
 
@@ -184,6 +196,8 @@ func (s *Server) routes() http.Handler {
 
 		// WebSocket — token auth via query param (browsers can't set headers on WS upgrade)
 		r.Get("/ws", hub.ServeWS(tokenManager))
+		// WhatsApp QR SSE — token auth via query param (EventSource can't set headers)
+		r.Get("/admin/whatsapp/sessions/{id}/qr", waHandler.StreamQR)
 
 		// Auth routes
 		r.Route("/auth", func(r chi.Router) {
@@ -256,6 +270,20 @@ func (s *Server) routes() http.Handler {
 				r.Get("/emails", rbacHandler.ListEmailLogs)
 				// Search
 				r.Get("/search", rbacHandler.Search)
+
+				// WhatsApp — superadmin only
+				r.Route("/whatsapp", func(r chi.Router) {
+					r.Use(middleware.RequireRole("superadmin"))
+					r.Post("/sessions", waHandler.CreateSession)
+					r.Get("/sessions", waHandler.ListSessions)
+					r.Delete("/sessions/{id}", waHandler.DeleteSession)
+					r.Patch("/sessions/{id}/pause", waHandler.PauseSession)
+					r.Patch("/sessions/{id}/resume", waHandler.ResumeSession)
+					r.Post("/sessions/{id}/pair", waHandler.GetPairingCode)
+					r.Post("/messages", waHandler.SendMessage)
+					r.Post("/messages/batch", waHandler.SendBatch)
+					r.Get("/messages", waHandler.ListMessages)
+				})
 			})
 
 			// AI

@@ -12,6 +12,7 @@ import (
 	"github.com/404nfid/go-svelte-starter-kit/internal/auth"
 	"github.com/404nfid/go-svelte-starter-kit/internal/cleanup"
 	"github.com/404nfid/go-svelte-starter-kit/internal/email"
+	"github.com/404nfid/go-svelte-starter-kit/internal/whatsapp"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/config"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/database"
 	"github.com/404nfid/go-svelte-starter-kit/pkg/logger"
@@ -60,6 +61,16 @@ func main() {
 	emailSender := email.NewSender(cfg.Email)
 	emailWorker := email.NewWorker(cfg.Redis.URL, emailEngine, emailSender, emailRepo, cfg.App.URL)
 
+	// ---- WhatsApp worker ----
+	waRepo := whatsapp.NewRepository(db)
+	waManager, err := whatsapp.NewManager(cfg.Database.URL, waRepo, log)
+	if err != nil {
+		log.Error("whatsapp manager init failed", "error", err)
+		os.Exit(1)
+	}
+	waManager.RestoreConnected(context.Background())
+	waWorker := whatsapp.NewWorker(cfg.Redis.URL, waManager, waRepo, log)
+
 	// ---- Cleanup worker (asynq server for "cleanup" queue) ----
 	authRepo := auth.NewRepository(db)
 	aiRepo := ai.NewRepository(db)
@@ -100,6 +111,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Daily at midnight: reset WhatsApp sent_today counters
+	if _, err := scheduler.Register(
+		"0 0 * * *",
+		asynq.NewTask("whatsapp:reset_daily", nil, asynq.Queue(whatsapp.QueueName), asynq.MaxRetry(2)),
+	); err != nil {
+		log.Error("register whatsapp reset task", "error", err)
+		os.Exit(1)
+	}
+
 	if err := scheduler.Start(); err != nil {
 		log.Error("start cleanup scheduler", "error", err)
 		os.Exit(1)
@@ -121,7 +141,16 @@ func main() {
 		log.Info("shutting down worker...")
 		scheduler.Shutdown()
 		cleanupSrv.Shutdown()
+		waWorker.Stop()
+		waManager.Shutdown()
 		emailWorker.Stop()
+	}()
+
+	// Start WhatsApp worker in background
+	go func() {
+		if err := waWorker.Start(); err != nil {
+			log.Error("whatsapp worker error", "error", err)
+		}
 	}()
 
 	// emailWorker.Start() blocks until Stop() is called
