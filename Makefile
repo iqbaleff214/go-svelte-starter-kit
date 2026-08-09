@@ -20,6 +20,7 @@ infra: ## Start infrastructure (Postgres + Redis) for local dev
 dev: infra ## Start backend + frontend with hot-reload
 	@echo "Starting backend (hot-reload via 'go run')..."
 	@cd backend && go run ./cmd/api & \
+	go run ./cmd/worker & \
 	echo "Starting frontend (vite dev)..." && \
 	cd frontend && npm run dev
 

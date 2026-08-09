@@ -115,13 +115,13 @@
 		qrES = whatsappApi.streamQR(
 			sess.id,
 			async (evt: QREvent) => {
-				if (evt.type === 'qr') {
-					qrDataURL = await QRCode.toDataURL(evt.code, { width: 280, margin: 2 });
-				} else if (evt.type === 'connected') {
+				if (evt.Type === 'qr') {
+					qrDataURL = await QRCode.toDataURL(evt.Code, { width: 280, margin: 2 });
+				} else if (evt.Type === 'connected') {
 					qrStatus = 'connected';
 					qrES?.close();
 					await loadSessions();
-				} else if (evt.type === 'timeout') {
+				} else if (evt.Type === 'timeout') {
 					qrStatus = 'timeout';
 				} else {
 					qrStatus = 'error';

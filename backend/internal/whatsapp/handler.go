@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -125,8 +126,8 @@ func (h *Handler) StreamQR(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write SSE headers and flush immediately — before Connect() which can take
-	// several seconds reaching WhatsApp servers. Without this the proxy sees no
-	// response and closes the socket ("socket hang up").
+	// several seconds reaching WhatsApp servers. Without this the proxy times out
+	// waiting for a response and closes the socket ("socket hang up").
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -138,10 +139,9 @@ func (h *Handler) StreamQR(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
-	// Clear the server's write deadline so the 30 s WriteTimeout doesn't cut
-	// the stream while we're waiting for QR codes.
+	// Clear the server WriteTimeout so the stream is not cut after 30 s.
 	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(zeroTime)
+	_ = rc.SetWriteDeadline(time.Time{})
 
 	sendEvt := func(evt QREvent) {
 		data, _ := json.Marshal(evt)
@@ -151,11 +151,21 @@ func (h *Handler) StreamQR(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	qrCh, err := h.svc.StartQR(r.Context(), id)
+	// Use a context independent of r.Context() for the WA connection so that
+	// HTTP-level timeouts don't cancel the WhatsApp dial. Cancel it when the
+	// handler exits (client disconnected or stream finished).
+	qrCtx, qrCancel := context.WithCancel(context.Background())
+	defer qrCancel()
+
+	qrCh, err := h.svc.StartQR(qrCtx, id)
 	if err != nil {
 		sendEvt(QREvent{Type: "error", Message: err.Error()})
 		return
 	}
+
+	// Keep-alive ping every 15 s prevents proxy/browser from closing an idle stream.
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -167,13 +177,16 @@ func (h *Handler) StreamQR(w http.ResponseWriter, r *http.Request) {
 			if evt.Type == "connected" || evt.Type == "timeout" || evt.Type == "error" {
 				return
 			}
+		case <-ticker.C:
+			fmt.Fprintf(w, ": ping\n\n") // SSE comment — ignored by client, keeps stream alive
+			if hasFlusher {
+				flusher.Flush()
+			}
 		case <-r.Context().Done():
-			return
+			return // client disconnected
 		}
 	}
 }
-
-var zeroTime = time.Time{}
 
 // POST /api/admin/whatsapp/sessions/:id/pair
 func (h *Handler) GetPairingCode(w http.ResponseWriter, r *http.Request) {

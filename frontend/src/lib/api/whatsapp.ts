@@ -27,9 +27,9 @@ export interface WAMessage {
 }
 
 export interface QREvent {
-  type: "qr" | "connected" | "timeout" | "error";
-  code: string;
-  message: string;
+  Type: "qr" | "connected" | "timeout" | "error";
+  Code: string;
+  Message: string;
 }
 
 export interface WAListMessagesParams {
@@ -74,6 +74,7 @@ export const whatsappApi = {
         onEvent(JSON.parse(e.data) as QREvent);
       } catch {
         // ignore malformed frames
+        console.warn("Malformed QR event:", e.data)
       }
     };
     if (onError) es.onerror = onError;

@@ -11,14 +11,9 @@ export default defineConfig({
         target: "http://localhost:8080",
         changeOrigin: true,
         ws: true,
-        configure(proxy) {
-          // Disable response buffering so SSE (text/event-stream) streams through immediately.
-          proxy.on("proxyRes", (proxyRes) => {
-            if (proxyRes.headers["content-type"]?.includes("text/event-stream")) {
-              proxyRes.socket?.setTimeout(0);
-            }
-          });
-        },
+        // Disable all timeouts so SSE streams are not cut by the proxy.
+        timeout: 0,
+        proxyTimeout: 0,
       },
     },
   },

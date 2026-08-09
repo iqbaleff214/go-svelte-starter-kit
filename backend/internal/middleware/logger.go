@@ -38,6 +38,18 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Flush implements http.Flusher so SSE and streaming responses work correctly.
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Unwrap lets http.NewResponseController traverse the wrapper to set deadlines.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // Hijack implements http.Hijacker so that gorilla/websocket can take over the
 // underlying TCP connection for WebSocket upgrades.
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

@@ -90,7 +90,8 @@ func (m *Manager) RestoreConnected(ctx context.Context) {
 }
 
 // StartQR initiates a QR-code pairing flow for a pending session.
-// Events are sent on the returned channel; it closes when pairing completes or fails.
+// Returns immediately; events arrive on the returned channel which closes when done.
+// ctx should be cancelled by the caller when the HTTP connection is closed.
 func (m *Manager) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREvent, error) {
 	device := m.waDB.NewDevice()
 	client := whatsmeow.NewClient(device, waLog.Noop)
@@ -100,34 +101,63 @@ func (m *Manager) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREv
 		return nil, fmt.Errorf("get qr channel: %w", err)
 	}
 
-	// Connect must be called after GetQRChannel; it is non-blocking for unlinked devices.
-	if err := client.Connect(); err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
+	out := make(chan QREvent, 16)
+
+	// send is a non-blocking helper; drops the event if ctx is done (caller gone).
+	send := func(evt QREvent) bool {
+		select {
+		case out <- evt:
+			return true
+		case <-ctx.Done():
+			return false
+		}
 	}
 
-	out := make(chan QREvent, 8)
-
-	// Single goroutine owns out; closing it here is safe because Connect() already returned.
 	go func() {
 		defer close(out)
-		for evt := range qrChan {
-			switch evt.Event {
-			case "code":
-				out <- QREvent{Type: "qr", Code: evt.Code}
-			case "success":
-				jid := client.Store.ID.String()
-				phone := strings.Split(jid, ":")[0]
-				_ = m.repo.UpdateSessionPaired(ctx, sessionID, jid, phone)
-				m.addToPool(sessionID, client)
-				out <- QREvent{Type: "connected", Code: jid}
-			case "timeout":
-				client.Disconnect()
-				out <- QREvent{Type: "timeout", Message: "QR code expired"}
-			default:
-				if evt.Error != nil {
-					client.Disconnect()
-					out <- QREvent{Type: "error", Message: evt.Error.Error()}
+
+		// Connect() uses client.BackgroundEventCtx (context.Background()) internally
+		// so the persistent keepAlive/handler loops are not tied to our ctx.
+		// The initial TCP dial can block 30–120 s if WA is unreachable — run it here
+		// so the caller is never blocked and can keep sending SSE keepalive pings.
+		if err := client.Connect(); err != nil {
+			send(QREvent{Type: "error", Message: err.Error()})
+			return
+		}
+
+		for {
+			select {
+			case evt, open := <-qrChan:
+				if !open {
+					return
 				}
+				switch evt.Event {
+				case "code":
+					if !send(QREvent{Type: "qr", Code: evt.Code}) {
+						client.Disconnect()
+						return
+					}
+				case "success":
+					jid := client.Store.ID.String()
+					phone := strings.Split(jid, ":")[0]
+					_ = m.repo.UpdateSessionPaired(ctx, sessionID, jid, phone)
+					m.addToPool(sessionID, client)
+					send(QREvent{Type: "connected", Code: jid})
+					return
+				case "timeout":
+					client.Disconnect()
+					send(QREvent{Type: "timeout", Message: "QR code expired"})
+					return
+				default:
+					if evt.Error != nil {
+						client.Disconnect()
+						send(QREvent{Type: "error", Message: evt.Error.Error()})
+						return
+					}
+				}
+			case <-ctx.Done():
+				client.Disconnect()
+				return
 			}
 		}
 	}()
