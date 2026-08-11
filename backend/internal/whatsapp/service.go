@@ -57,6 +57,9 @@ func (s *Service) ResumeSession(ctx context.Context, id uuid.UUID) error {
 }
 
 // StartQR delegates to the manager and returns the QR event channel.
+// When the "connected" event fires, an immediate sync_pool task is enqueued
+// so the worker picks up the newly paired session without waiting for the
+// periodic SyncPool tick.
 func (s *Service) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREvent, error) {
 	if s.manager == nil {
 		return nil, fmt.Errorf("whatsapp manager not initialised (check server logs)")
@@ -68,7 +71,28 @@ func (s *Service) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREv
 	if sess.Status == StatusConnected {
 		return nil, fmt.Errorf("session already connected")
 	}
-	return s.manager.StartQR(ctx, sessionID)
+	inner, err := s.manager.StartQR(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(chan QREvent, 16)
+	go func() {
+		defer close(out)
+		for evt := range inner {
+			out <- evt
+			if evt.Type == "connected" {
+				_ = s.enqueueSyncPool()
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (s *Service) enqueueSyncPool() error {
+	task := asynq.NewTask(TaskSyncPool, nil, asynq.Queue(QueueName), asynq.MaxRetry(0))
+	_, err := s.queue.Enqueue(task)
+	return err
 }
 
 // GetPairingCode returns a phone-number-based 8-digit pairing code.

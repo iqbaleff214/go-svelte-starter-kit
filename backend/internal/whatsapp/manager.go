@@ -7,17 +7,38 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
+	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
-	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"google.golang.org/protobuf/proto"
 )
+
+// slogWALogger bridges whatsmeow's waLog.Logger to our slog.Logger so we can
+// see why WhatsApp connections drop (stream errors, invalid keys, etc.).
+type slogWALogger struct{ log *slog.Logger }
+
+func (l *slogWALogger) Debugf(msg string, args ...interface{}) {
+	l.log.Debug(fmt.Sprintf(msg, args...))
+}
+func (l *slogWALogger) Infof(msg string, args ...interface{}) {
+	l.log.Info(fmt.Sprintf(msg, args...))
+}
+func (l *slogWALogger) Warnf(msg string, args ...interface{}) {
+	l.log.Warn(fmt.Sprintf(msg, args...))
+}
+func (l *slogWALogger) Errorf(msg string, args ...interface{}) {
+	l.log.Error(fmt.Sprintf(msg, args...))
+}
+func (l *slogWALogger) Sub(module string) waLog.Logger {
+	return &slogWALogger{log: l.log.With("wa_module", module)}
+}
 
 // QREvent is sent over the channel during the QR pairing flow.
 type QREvent struct {
@@ -44,7 +65,8 @@ type Manager struct {
 }
 
 func NewManager(dbURL string, repo *Repository, log *slog.Logger) (*Manager, error) {
-	container, err := sqlstore.New(context.Background(), "pgx", dbURL, waLog.Noop)
+	waLogger := &slogWALogger{log: log.With("component", "whatsmeow")}
+	container, err := sqlstore.New(context.Background(), "pgx", dbURL, waLogger)
 	if err != nil {
 		return nil, fmt.Errorf("whatsmeow sqlstore: %w", err)
 	}
@@ -55,6 +77,66 @@ func NewManager(dbURL string, repo *Repository, log *slog.Logger) (*Manager, err
 		dbURL: dbURL,
 		log:   log,
 	}, nil
+}
+
+// SyncPool connects any DB-connected sessions not yet in the pool and removes
+// pool entries whose DB status is no longer connected. Call periodically.
+func (m *Manager) SyncPool(ctx context.Context) {
+	sessions, err := m.repo.ListConnectedSessions(ctx)
+	if err != nil {
+		m.log.Error("wa: sync pool", "error", err)
+		return
+	}
+
+	wanted := make(map[uuid.UUID]bool, len(sessions))
+	for _, s := range sessions {
+		wanted[s.ID] = true
+	}
+
+	// Disconnect pool entries that are no longer connected in DB.
+	m.mu.Lock()
+	for id, client := range m.byID {
+		if !wanted[id] {
+			client.Disconnect()
+			delete(m.byID, id)
+		}
+	}
+	m.rebuildPool()
+
+	// Snapshot of currently pooled IDs so we can skip them below.
+	inPool := make(map[uuid.UUID]bool, len(m.byID))
+	for id := range m.byID {
+		inPool[id] = true
+	}
+	m.mu.Unlock()
+
+	// Connect new sessions.
+	for _, s := range sessions {
+		if inPool[s.ID] || s.JID == "" {
+			continue
+		}
+		jid, err := types.ParseJID(s.JID)
+		if err != nil {
+			continue
+		}
+		device, err := m.waDB.GetDevice(ctx, jid)
+		if err != nil || device == nil {
+			_ = m.repo.UpdateSessionStatus(ctx, s.ID, StatusDisconnected)
+			continue
+		}
+		client := whatsmeow.NewClient(device, &slogWALogger{log: m.log.With("component", "whatsmeow")})
+		if err := client.Connect(); err != nil {
+			_ = m.repo.UpdateSessionStatus(ctx, s.ID, StatusDisconnected)
+			continue
+		}
+		if ok := client.WaitForConnection(30 * time.Second); !ok {
+			client.Disconnect()
+			_ = m.repo.UpdateSessionStatus(ctx, s.ID, StatusDisconnected)
+			continue
+		}
+		m.addToPool(s.ID, client)
+		m.log.Info("wa: synced session", "name", s.Name, "jid", s.JID)
+	}
 }
 
 // RestoreConnected reconnects all sessions that were previously connected.
@@ -78,10 +160,19 @@ func (m *Manager) RestoreConnected(ctx context.Context) {
 			_ = m.repo.UpdateSessionStatus(ctx, s.ID, StatusDisconnected)
 			continue
 		}
-		client := whatsmeow.NewClient(device, waLog.Noop)
+		client := whatsmeow.NewClient(device, &slogWALogger{log: m.log.With("component", "whatsmeow")})
+		// Connect() can return nil even on retryable failures (auto-reconnect starts
+		// in background). WaitForConnection confirms the WebSocket is ready before
+		// we add the client to the send pool.
 		if err := client.Connect(); err != nil {
 			_ = m.repo.UpdateSessionStatus(ctx, s.ID, StatusDisconnected)
 			m.log.Warn("wa: reconnect failed", "jid", s.JID, "error", err)
+			continue
+		}
+		if ok := client.WaitForConnection(30 * time.Second); !ok {
+			client.Disconnect()
+			_ = m.repo.UpdateSessionStatus(ctx, s.ID, StatusDisconnected)
+			m.log.Warn("wa: timed out waiting for connection", "jid", s.JID)
 			continue
 		}
 		m.addToPool(s.ID, client)
@@ -94,7 +185,7 @@ func (m *Manager) RestoreConnected(ctx context.Context) {
 // ctx should be cancelled by the caller when the HTTP connection is closed.
 func (m *Manager) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREvent, error) {
 	device := m.waDB.NewDevice()
-	client := whatsmeow.NewClient(device, waLog.Noop)
+	client := whatsmeow.NewClient(device, &slogWALogger{log: m.log.With("component", "whatsmeow")})
 
 	qrChan, err := client.GetQRChannel(ctx)
 	if err != nil {
@@ -141,8 +232,12 @@ func (m *Manager) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREv
 					jid := client.Store.ID.String()
 					phone := strings.Split(jid, ":")[0]
 					_ = m.repo.UpdateSessionPaired(ctx, sessionID, jid, phone)
-					m.addToPool(sessionID, client)
 					send(QREvent{Type: "connected", Code: jid})
+					// Allow 5 s for WhatsApp to finish initial post-pair device sync
+					// before we disconnect. Cutting this short can leave the device
+					// in a partially-initialized state on WhatsApp's side.
+					time.Sleep(5 * time.Second)
+					client.Disconnect()
 					return
 				case "timeout":
 					client.Disconnect()
@@ -168,7 +263,7 @@ func (m *Manager) StartQR(ctx context.Context, sessionID uuid.UUID) (<-chan QREv
 // GetPairingCode requests a phone-number-based pairing code (alternative to QR).
 func (m *Manager) GetPairingCode(ctx context.Context, sessionID uuid.UUID, phone string) (string, error) {
 	device := m.waDB.NewDevice()
-	client := whatsmeow.NewClient(device, waLog.Noop)
+	client := whatsmeow.NewClient(device, &slogWALogger{log: m.log.With("component", "whatsmeow")})
 
 	if err := client.Connect(); err != nil {
 		return "", fmt.Errorf("connect: %w", err)
@@ -185,7 +280,8 @@ func (m *Manager) GetPairingCode(ctx context.Context, sessionID uuid.UUID, phone
 			jid := client.Store.ID.String()
 			phoneParsed := strings.Split(jid, ":")[0]
 			_ = m.repo.UpdateSessionPaired(ctx, sessionID, jid, phoneParsed)
-			m.addToPool(sessionID, client)
+			// Disconnect — the worker owns persistent connections.
+			client.Disconnect()
 		}
 	})
 
@@ -199,6 +295,20 @@ func (m *Manager) Send(ctx context.Context, recipient, body string) (uuid.UUID, 
 	if err != nil {
 		return uuid.Nil, err
 	}
+	m.log.Warn("wa: send attempt",
+		"pool_size", len(m.pool),
+		"is_connected", entry.client.IsConnected(),
+		"is_logged_in", entry.client.IsLoggedIn(),
+	)
+	// Guard against the race where the socket closed between addToPool and pick()
+	// before the events.Disconnected handler had a chance to remove it.
+	if !entry.client.IsConnected() {
+		m.mu.Lock()
+		delete(m.byID, entry.sessionID)
+		m.rebuildPool()
+		m.mu.Unlock()
+		return uuid.Nil, fmt.Errorf("%w: stale pool entry (socket already closed)", whatsmeow.ErrNotConnected)
+	}
 
 	jid, err := types.ParseJID(normalizePhone(recipient))
 	if err != nil {
@@ -209,6 +319,12 @@ func (m *Manager) Send(ctx context.Context, recipient, body string) (uuid.UUID, 
 		Conversation: proto.String(body),
 	}
 	if _, err := entry.client.SendMessage(ctx, jid, msg); err != nil {
+		// Socket-layer failures ("websocket not connected") don't satisfy
+		// errors.Is(err, ErrNotConnected) because they come from a different
+		// error path. Normalize so the worker retry loop can catch them.
+		if !entry.client.IsConnected() || strings.Contains(err.Error(), "websocket not connected") {
+			return uuid.Nil, fmt.Errorf("%w: %v", whatsmeow.ErrNotConnected, err)
+		}
 		return uuid.Nil, fmt.Errorf("send message: %w", err)
 	}
 
@@ -243,19 +359,28 @@ func (m *Manager) Shutdown() {
 
 func (m *Manager) addToPool(id uuid.UUID, client *whatsmeow.Client) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.byID[id] = client
 	m.rebuildPool()
+	m.mu.Unlock()
 
-	// Watch for disconnects / bans
+	// Watch for disconnects, auto-reconnects, and bans.
 	client.AddEventHandler(func(evt interface{}) {
 		switch evt.(type) {
 		case *events.Disconnected:
-			_ = m.repo.UpdateSessionStatus(context.Background(), id, StatusDisconnected)
+			// Whatsmeow will auto-reconnect; remove from pool temporarily
+			// so we don't try to send on a dead socket while reconnecting.
 			m.mu.Lock()
 			delete(m.byID, id)
 			m.rebuildPool()
 			m.mu.Unlock()
+			_ = m.repo.UpdateSessionStatus(context.Background(), id, StatusDisconnected)
+		case *events.Connected:
+			// Re-add to pool after successful reconnect.
+			m.mu.Lock()
+			m.byID[id] = client
+			m.rebuildPool()
+			m.mu.Unlock()
+			_ = m.repo.UpdateSessionStatus(context.Background(), id, StatusConnected)
 		case *events.LoggedOut:
 			_ = m.repo.UpdateSessionStatus(context.Background(), id, StatusBanned)
 			m.mu.Lock()

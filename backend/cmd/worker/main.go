@@ -136,6 +136,20 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
+	// Periodically sync the WA pool: connect newly paired sessions, drop removed ones.
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				waManager.SyncPool(context.Background())
+			case <-quit:
+				return
+			}
+		}
+	}()
+
 	go func() {
 		<-quit
 		log.Info("shutting down worker...")

@@ -73,9 +73,10 @@ type PairRequest struct {
 // ---- Asynq task ----
 
 const (
-	QueueName   = "whatsapp"
-	TaskSend    = "whatsapp:send"
-	maxRetry    = 3
+	QueueName    = "whatsapp"
+	TaskSend     = "whatsapp:send"
+	TaskSyncPool = "whatsapp:sync_pool"
+	maxRetry     = 3
 )
 
 type SendPayload struct {

@@ -170,11 +170,12 @@ func (s *Server) routes() http.Handler {
 
 	// ---- WhatsApp ----
 	waRepo := whatsapp.NewRepository(s.db)
+	// The API server only uses Manager for QR/pairing flows (temporary connections).
+	// Persistent connections are owned exclusively by the worker process to avoid
+	// duplicate device sessions that cause "websocket not connected" errors.
 	waManager, err := whatsapp.NewManager(s.cfg.Database.URL, waRepo, s.logger)
 	if err != nil {
 		s.logger.Error("whatsapp manager init failed", "error", err)
-	} else {
-		go waManager.RestoreConnected(context.Background())
 	}
 	waSvc := whatsapp.NewService(waRepo, waManager, s.cfg.Redis.URL, s.logger)
 	waHandler := whatsapp.NewHandler(waSvc, v, tokenManager)
